@@ -242,9 +242,11 @@ native bool MGE_IsValidArena(int arena_index);
  *
  * @param client         Client to add
  * @param arena_index    Target arena
+ * @param slot           Specific slot (1-4) or 0 for automatic assignment
  * @return               True on success, false otherwise
+ * @error                Invalid slot for arena type, slot already occupied, etc.
  */
-native bool MGE_AddPlayerToArena(int client, int arena_index);
+native bool MGE_AddPlayerToArena(int client, int arena_index, int slot = 0);
 
 /**
  * Removes a player from their current arena
@@ -287,6 +289,32 @@ native bool MGE_SetPlayerReady(int client, bool ready);
  */
 native int MGE_GetPlayerTeammate(int client);
 
+/**
+ * Checks if an arena supports a specific game mode
+ *
+ * @param arena_index    Arena index
+ * @param game_mode      Game mode flag to check (MGE_GAMEMODE_*)
+ * @return               True if arena supports the mode, false otherwise
+ */
+native bool MGE_ArenaHasGameMode(int arena_index, int game_mode);
+
+/**
+ * Checks if a slot is valid for the given arena type
+ *
+ * @param arena_index    Arena index
+ * @param slot           Slot to validate (1-4)
+ * @return               True if slot is valid for arena, false otherwise
+ */
+native bool MGE_IsValidSlotForArena(int arena_index, int slot);
+
+/**
+ * Gets the maximum number of slots for an arena
+ *
+ * @param arena_index    Arena index
+ * @return               Maximum slots (2 for 1v1, 4 for 2v2, 0 if invalid)
+ */
+native int MGE_GetArenaMaxSlots(int arena_index);
+
 public SharedPlugin __pl_mge = 
 {
     name = "mge",
@@ -316,5 +344,8 @@ public void __pl_mge_SetNTVOptional()
     MarkNativeAsOptional("MGE_IsPlayerReady");
     MarkNativeAsOptional("MGE_SetPlayerReady");
     MarkNativeAsOptional("MGE_GetPlayerTeammate");
+    MarkNativeAsOptional("MGE_ArenaHasGameMode");
+    MarkNativeAsOptional("MGE_IsValidSlotForArena");
+    MarkNativeAsOptional("MGE_GetArenaMaxSlots");
 }
 #endif

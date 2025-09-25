@@ -461,7 +461,7 @@ void RemoveFromQueue(int client, bool calcstats = false, bool specfix = false)
 }
 
 // Add player to arena queue with team preference and menu options
-void AddInQueue(int client, int arena_index, bool showmsg = true, int playerPrefTeam = 0, bool show2v2Menu = true)
+void AddInQueue(int client, int arena_index, bool showmsg = true, int playerPrefTeam = 0, bool show2v2Menu = true, int forcedSlot = 0)
 {
     if (!IsValidClient(client))
         return;
@@ -510,10 +510,36 @@ void AddInQueue(int client, int arena_index, bool showmsg = true, int playerPref
         // If all slots filled, continue to regular queue logic
     }
 
+    // Handle forced slot assignment (used by API natives)
+    int player_slot = SLOT_ONE;
+    if (forcedSlot > 0)
+    {
+        // Validate forced slot for arena type
+        if (!IsValidSlotForArena(arena_index, forcedSlot))
+        {
+            if (showmsg)
+            {
+                if (g_bFourPersonArena[arena_index])
+                    MC_PrintToChat(client, "[MGE] Invalid slot %d for 2v2 arena (valid slots: 1-4)", forcedSlot);
+                else
+                    MC_PrintToChat(client, "[MGE] Invalid slot %d for 1v1 arena (valid slots: 1-2)", forcedSlot);
+            }
+            return;
+        }
+        
+        // Check if forced slot is already occupied
+        if (g_iArenaQueue[arena_index][forcedSlot] != 0)
+        {
+            if (showmsg)
+                MC_PrintToChat(client, "[MGE] Slot %d is already occupied", forcedSlot);
+            return;
+        }
+        
+        player_slot = forcedSlot;
+    }
     // For 2v2 arenas, only respect team preference for active slots (team switching)
     // Queued players just join the first available slot regardless of team
-    int player_slot = SLOT_ONE;
-    if (g_bFourPersonArena[arena_index] && playerPrefTeam != 0)
+    else if (g_bFourPersonArena[arena_index] && playerPrefTeam != 0)
     {
         // This is team switching for active players only
         if (playerPrefTeam == TEAM_RED)
@@ -654,7 +680,6 @@ void AddInQueue(int client, int arena_index, bool showmsg = true, int playerPref
 
     return;
 }
-
 
 // ===== MATCH FLOW CONTROL =====
 
@@ -1771,6 +1796,22 @@ void RemoveArenaProjectiles(int arena_index)
     }
     
     delete entitiesToRemove;
+}
+
+// ===== ARENA VALIDATION =====
+
+// Validates if a slot is appropriate for an arena type
+bool IsValidSlotForArena(int arena_index, int slot)
+{
+    if (slot < SLOT_ONE || slot > SLOT_FOUR)
+        return false;
+    
+    // For 1v1 arenas, only slots 1-2 are valid
+    if (!g_bFourPersonArena[arena_index])
+        return (slot == SLOT_ONE || slot == SLOT_TWO);
+    
+    // For 2v2 arenas, all slots 1-4 are valid
+    return true;
 }
 
 // ===== ARENA DATA EXTRACTION =====

@@ -18,6 +18,9 @@ void RegisterNatives()
     CreateNative("MGE_IsPlayerReady", Native_IsPlayerReady);
     CreateNative("MGE_SetPlayerReady", Native_SetPlayerReady);
     CreateNative("MGE_GetPlayerTeammate", Native_GetPlayerTeammate);
+    CreateNative("MGE_ArenaHasGameMode", Native_ArenaHasGameMode);
+    CreateNative("MGE_IsValidSlotForArena", Native_IsValidSlotForArena);
+    CreateNative("MGE_GetArenaMaxSlots", Native_GetArenaMaxSlots);
 }
 
 // ===== PLAYER INFORMATION NATIVES =====
@@ -158,19 +161,53 @@ int Native_IsValidArena(Handle plugin, int numParams)
 
 // ===== ARENA MANAGEMENT NATIVES =====
 
-// Adds a player to an arena
+// Adds a player to an arena with optional slot specification
 int Native_AddPlayerToArena(Handle plugin, int numParams)
 {
     int client = GetNativeCell(1);
     int arena_index = GetNativeCell(2);
+    int slot = (numParams >= 3) ? GetNativeCell(3) : 0; // Default to automatic assignment
     
     if (!IsValidClient(client))
+    {
+        ThrowNativeError(SP_ERROR_PARAM, "Invalid client index %d", client);
         return false;
-    if (arena_index < 1 || arena_index > g_iArenaCount)
-        return false;
+    }
     
-    // Call the existing AddInQueue function
-    AddInQueue(client, arena_index, true);
+    if (arena_index < 1 || arena_index > g_iArenaCount)
+    {
+        ThrowNativeError(SP_ERROR_PARAM, "Invalid arena index %d", arena_index);
+        return false;
+    }
+    
+    // For manual slot assignment, do validation here and throw native errors
+    if (slot > 0)
+    {
+        // Validate slot for arena type
+        if (!IsValidSlotForArena(arena_index, slot))
+        {
+            if (g_bFourPersonArena[arena_index])
+            {
+                ThrowNativeError(SP_ERROR_PARAM, "Invalid slot %d for 2v2 arena (valid slots: 1-4)", slot);
+            }
+            else
+            {
+                ThrowNativeError(SP_ERROR_PARAM, "Invalid slot %d for 1v1 arena (valid slots: 1-2)", slot);
+            }
+            return false;
+        }
+        
+        // Check if slot is already occupied
+        if (g_iArenaQueue[arena_index][slot] != 0)
+        {
+            ThrowNativeError(SP_ERROR_PARAM, "Slot %d in arena %d is already occupied", slot, arena_index);
+            return false;
+        }
+    }
+    
+    // Call the enhanced AddInQueue function with all parameters
+    // showmsg=false for API calls, no team preference, no 2v2 menu, with forced slot
+    AddInQueue(client, arena_index, false, 0, false, slot);
     return true;
 }
 
@@ -248,3 +285,54 @@ int Native_GetPlayerTeammate(Handle plugin, int numParams)
     
     return GetPlayerTeammate(g_iPlayerSlot[client], arena_index);
 }
+
+// ===== GAME MODE & VALIDATION NATIVES =====
+
+// Checks if an arena supports a specific game mode
+int Native_ArenaHasGameMode(Handle plugin, int numParams)
+{
+    int arena_index = GetNativeCell(1);
+    int game_mode = GetNativeCell(2);
+    
+    if (arena_index < 1 || arena_index > g_iArenaCount)
+        return false;
+    
+    switch (game_mode)
+    {
+        case MGE_GAMEMODE_MGE: return g_bArenaMGE[arena_index];
+        case MGE_GAMEMODE_BBALL: return g_bArenaBBall[arena_index];
+        case MGE_GAMEMODE_KOTH: return g_bArenaKoth[arena_index];
+        case MGE_GAMEMODE_AMMOMOD: return g_bArenaAmmomod[arena_index];
+        case MGE_GAMEMODE_MIDAIR: return g_bArenaMidair[arena_index];
+        case MGE_GAMEMODE_ENDIF: return g_bArenaEndif[arena_index];
+        case MGE_GAMEMODE_ULTIDUO: return g_bArenaUltiduo[arena_index];
+        case MGE_GAMEMODE_TURRIS: return g_bArenaTurris[arena_index];
+        case MGE_GAMEMODE_4PLAYER: return g_bFourPersonArena[arena_index];
+    }
+    
+    return false;
+}
+
+// Checks if a slot is valid for the given arena type
+int Native_IsValidSlotForArena(Handle plugin, int numParams)
+{
+    int arena_index = GetNativeCell(1);
+    int slot = GetNativeCell(2);
+    
+    if (arena_index < 1 || arena_index > g_iArenaCount)
+        return false;
+    
+    return IsValidSlotForArena(arena_index, slot);
+}
+
+// Gets the maximum number of slots for an arena
+int Native_GetArenaMaxSlots(Handle plugin, int numParams)
+{
+    int arena_index = GetNativeCell(1);
+    
+    if (arena_index < 1 || arena_index > g_iArenaCount)
+        return 0;
+    
+    return g_bFourPersonArena[arena_index] ? SLOT_FOUR : SLOT_TWO;
+}
+
