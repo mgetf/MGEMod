@@ -68,6 +68,12 @@ Action Timer_ChangeSpecTarget(Handle timer, int userid)
     {
         return Plugin_Stop;
     }
+    
+    // Only check if still in spectator
+    if (GetClientTeam(client) != TEAM_SPEC || g_iPlayerArena[client] > 0)
+    {
+        return Plugin_Stop;
+    }
 
     int target = GetEntPropEnt(client, Prop_Send, "m_hObserverTarget");
 

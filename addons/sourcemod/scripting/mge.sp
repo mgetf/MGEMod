@@ -323,6 +323,7 @@ public void OnMapStart()
         HookEvent("teamplay_round_start", Event_RoundStart, EventHookMode_Post);
         HookEvent("teamplay_win_panel", Event_WinPanel, EventHookMode_Post);
         HookEvent("player_team", Event_Suppress, EventHookMode_Pre);
+        HookEvent("player_team", Event_PlayerTeam, EventHookMode_Pre);
         HookEvent("player_class", Event_Suppress, EventHookMode_Pre);
 
         AddNormalSoundHook(Sound_BlockSound);
@@ -648,5 +649,16 @@ Action Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
 Action Event_Suppress(Event event, const char[] name, bool dontBroadcast)
 {
     event.BroadcastDisabled = true;
+    return Plugin_Continue;
+}
+
+Action Event_PlayerTeam(Event event, const char[] name, bool dontBroadcast)
+{
+    int client = GetClientOfUserId(event.GetInt("userid"));
+    int newTeam = event.GetInt("team");
+    if (IsValidClient(client) && newTeam == TEAM_SPEC)
+    {
+        CreateTimer(0.3, Timer_ChangeSpecTarget, GetClientUserId(client));
+    }
     return Plugin_Continue;
 }

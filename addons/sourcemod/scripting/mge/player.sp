@@ -708,7 +708,7 @@ Action Command_JoinTeam(int client, int args)
 
         // Handle spectator HUD and target logic (moved from Event_PlayerTeam)
         HideHud(client);
-        CreateTimer(1.0, Timer_ChangeSpecTarget, GetClientUserId(client));
+        CreateTimer(0.3, Timer_ChangeSpecTarget, GetClientUserId(client));
 
         return Plugin_Handled;
     }
