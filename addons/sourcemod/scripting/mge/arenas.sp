@@ -964,7 +964,7 @@ void ShowMainMenu(int client, bool listplayers = true)
         {
             Format(report, sizeof(report), "\x05%s:", g_sArenaName[i]);
 
-            if (!g_bNoDisplayRating)
+            if (!g_bNoDisplayRating && g_bShowElo[client])
             {
                 if (red_valid && blu_valid)
                     Format(report, sizeof(report), "%s \x04%N \x03(%d) \x05vs \x04%N (%d) \x05", report, red_f1, g_iPlayerRating[red_f1], blu_f1, g_iPlayerRating[blu_f1]);
