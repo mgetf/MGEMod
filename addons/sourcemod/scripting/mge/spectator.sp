@@ -69,10 +69,24 @@ Action Timer_ChangeSpecTarget(Handle timer, int userid)
         return Plugin_Stop;
     }
     
-    // Only check if still in spectator
-    if (GetClientTeam(client) != TEAM_SPEC || g_iPlayerArena[client] > 0)
+    // Only check if still in spectator team
+    if (GetClientTeam(client) != TEAM_SPEC)
     {
         return Plugin_Stop;
+    }
+    
+    // Check if player is actively fighting (not waiting in queue)
+    // If they're in an active slot, don't update spec target
+    int player_arena = g_iPlayerArena[client];
+    int player_slot = g_iPlayerSlot[client];
+    if (player_arena > 0 && player_slot > 0)
+    {
+        int max_active_slot = g_bFourPersonArena[player_arena] ? SLOT_FOUR : SLOT_TWO;
+        if (player_slot <= max_active_slot)
+        {
+            // Player is in an active slot, shouldn't be spectating
+            return Plugin_Stop;
+        }
     }
 
     int target = GetEntPropEnt(client, Prop_Send, "m_hObserverTarget");

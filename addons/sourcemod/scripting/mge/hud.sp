@@ -11,15 +11,33 @@ void UpdateHud(int client)
     bool is_spectator = false;
     
     // Determine arena and role
-    if (g_iPlayerArena[client] > 0)
+    // Check if player is in an ACTIVE slot (not waiting in queue)
+    int player_arena = g_iPlayerArena[client];
+    int player_slot = g_iPlayerSlot[client];
+    bool is_active_player = false;
+    
+    if (player_arena > 0 && player_slot > 0)
     {
-        // Player in arena
-        arena_index = g_iPlayerArena[client];
+        // Determine if this is an active slot or a queue slot
+        int max_active_slot = g_bFourPersonArena[player_arena] ? SLOT_FOUR : SLOT_TWO;
+        is_active_player = (player_slot <= max_active_slot);
+    }
+    
+    if (is_active_player)
+    {
+        // Player is actively fighting in arena
+        arena_index = player_arena;
     }
     else if (g_iPlayerSpecTarget[client] > 0 && IsValidClient(g_iPlayerSpecTarget[client]))
     {
-        // Spectator watching someone
+        // Spectator (or queued player) watching someone
         arena_index = g_iPlayerArena[g_iPlayerSpecTarget[client]];
+        is_spectator = true;
+    }
+    else if (player_arena > 0)
+    {
+        // Queued player not spectating anyone - show their queued arena
+        arena_index = player_arena;
         is_spectator = true;
     }
     else
