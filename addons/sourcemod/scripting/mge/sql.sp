@@ -4,29 +4,44 @@
 void PrepareSQL() 
 {
     char error[256];
+    bool usingFallback = false;
 
-    // Check if database config is specified
-    if (strlen(g_sDBConfig) == 0)
+    // Check if database config is specified and exists
+    if (strlen(g_sDBConfig) == 0 || !SQL_CheckConfig(g_sDBConfig))
     {
+        if (strlen(g_sDBConfig) > 0)
+        {
+            LogMessage("Database config '%s' not found in databases.cfg, falling back to storage-local (SQLite)", g_sDBConfig);
+        }
+        
         g_DB = SQL_Connect("storage-local", true, error, sizeof(error));
+        usingFallback = true;
         
         if (g_DB == null)
         {
-            SetFailState("Could not connect to SQLite database: %s", error);
+            LogError("Could not connect to SQLite database: %s - stats will be disabled", error);
+            g_bNoStats = true;
+            return;
         }
     }
     else
     {
-        if (!SQL_CheckConfig(g_sDBConfig))
-        {
-            SetFailState("Database config '%s' not found in databases.cfg", g_sDBConfig);
-        }
-        
         g_DB = SQL_Connect(g_sDBConfig, true, error, sizeof(error));
         
         if (g_DB == null)
         {
-            SetFailState("Could not connect to specified database config '%s': %s", g_sDBConfig, error);
+            // Failed to connect to specified config, try fallback to storage-local
+            LogError("Could not connect to database config '%s': %s - falling back to storage-local", g_sDBConfig, error);
+            
+            g_DB = SQL_Connect("storage-local", true, error, sizeof(error));
+            usingFallback = true;
+            
+            if (g_DB == null)
+            {
+                LogError("Could not connect to SQLite fallback database: %s - stats will be disabled", error);
+                g_bNoStats = true;
+                return;
+            }
         }
     }
 
@@ -47,10 +62,21 @@ void PrepareSQL()
     }
     else
     {
-        SetFailState("Unsupported database type: %s", ident);
+        LogError("Unsupported database type: %s - stats will be disabled", ident);
+        g_bNoStats = true;
+        delete g_DB;
+        g_DB = null;
+        return;
     }
 
-    LogMessage("Successfully connected to database config '%s' [%s]", g_sDBConfig, ident);
+    if (usingFallback)
+    {
+        LogMessage("Successfully connected to fallback database 'storage-local' [%s]", ident);
+    }
+    else
+    {
+        LogMessage("Successfully connected to database config '%s' [%s]", g_sDBConfig, ident);
+    }
 
     // Create tables using abstraction layer
     char query[1024];
