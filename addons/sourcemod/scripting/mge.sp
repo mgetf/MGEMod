@@ -15,7 +15,7 @@
 #include <convar_class>
 #include <mge>
 
-#define PL_VERSION "3.1.0-beta10"
+#define PL_VERSION "3.1.0-beta9"
 
 #define MAXARENAS 63
 #define MAXSPAWNS 15
@@ -91,6 +91,7 @@ public void OnPluginStart()
 
     // Initialize cookies
     g_hShowEloCookie = new Cookie("mgemod_showelo", "MGEMod ELO display preference", CookieAccess_Private);
+    g_hShowQueueCookie = new Cookie("mgemod_showqueue", "MGEMod queue display in keyhint preference", CookieAccess_Private);
 
     // ConVars
     CreateConVar("sm_mgemod_version", PL_VERSION, "MGEMod version", FCVAR_SPONLY | FCVAR_NOTIFY);
@@ -113,6 +114,7 @@ public void OnPluginStart()
     gcvar_2v2Elo = new Convar("mgemod_2v2_elo", "1", "Enable ELO calculation and display for 2v2 matches? (0 = Disabled, 1 = Enabled)", FCVAR_NONE, true, 0.0, true, 1.0);
     gcvar_clearProjectiles = new Convar("mgemod_clear_projectiles", "0", "Clear projectiles when a new round starts? (0 = Disabled, 1 = Enabled)", FCVAR_NONE, true, 0.0, true, 1.0);
     gcvar_allowUnverifiedPlayers = new Convar("mgemod_allow_unverified_players", "0", "Allow players with unverified ELO to play? ELO calculations will be skipped for them. (0 = Block unverified, 1 = Allow but skip ELO)", FCVAR_NONE, true, 0.0, true, 1.0);
+    gcvar_vipQueuePriority = new Convar("mgemod_vip_queue_priority", "0", "Enable VIP queue priority? Players with 'a' or 'z' admin flags will be placed at the front of the queue. (0 = Disabled, 1 = Enabled)", FCVAR_NONE, true, 0.0, true, 1.0);
 
     // Create config file
     Convar.CreateConfig("mge");
@@ -129,6 +131,7 @@ public void OnPluginStart()
     g_b2v2Elo = gcvar_2v2Elo.IntValue ? true : false;
     g_bClearProjectiles = gcvar_clearProjectiles.IntValue ? true : false;
     g_bAllowUnverifiedPlayers = gcvar_allowUnverifiedPlayers.IntValue ? true : false;
+    g_bVipQueuePriority = gcvar_vipQueuePriority.IntValue ? true : false;
 
     gcvar_dbConfig.GetString(g_sDBConfig, sizeof(g_sDBConfig));
     gcvar_bballParticle_red.GetString(g_sBBallParticleRed, sizeof(g_sBBallParticleRed));
@@ -139,6 +142,9 @@ public void OnPluginStart()
     g_fRocketForceX = gcvar_RocketForceX.FloatValue;
     g_fRocketForceY = gcvar_RocketForceY.FloatValue;
     g_fRocketForceZ = gcvar_RocketForceZ.FloatValue;
+
+    // Initialize sound setting with default value (will be updated after convar creation)
+    g_bPlayArenaSound = true;
 
     for (int i = 0; i < MAXARENAS + 1; ++i)
     {
@@ -170,10 +176,19 @@ public void OnPluginStart()
     gcvar_2v2Elo.AddChangeHook(handler_ConVarChange);
     gcvar_clearProjectiles.AddChangeHook(handler_ConVarChange);
     gcvar_allowUnverifiedPlayers.AddChangeHook(handler_ConVarChange);
+    gcvar_vipQueuePriority.AddChangeHook(handler_ConVarChange);
+
+    // Sound control convar
+    g_cvarPlayArenaSound = new Convar("mgemod_play_arena_sound", "1", "Play sound when player auto-joins arena from waiting list (0 = Disabled, 1 = Enabled)", FCVAR_NONE, true, 0.0, true, 1.0);
+    g_cvarPlayArenaSound.AddChangeHook(handler_ConVarChange);
+
+    // Initialize sound setting from convar
+    g_bPlayArenaSound = g_cvarPlayArenaSound.BoolValue;
 
     // Client commands
     RegConsoleCmd("mgemod", Command_Menu, "MGEMod Menu");
     RegConsoleCmd("add", Command_Menu, "Usage: add <arena number/arena name/@player>. Add to an arena.");
+    RegConsoleCmd("wadd", Command_Wadd, "Usage: wadd <arena number/arena name>. Add to waiting list for arena.");
     RegConsoleCmd("swap", Command_Swap, "Ask your teammate to swap classes with you in ultiduo");
     RegConsoleCmd("remove", Command_Remove, "Remove from current arena.");
     RegConsoleCmd("top5", Command_Top5, "Display the Top players.");
@@ -194,6 +209,12 @@ public void OnPluginStart()
     RegConsoleCmd("eureka_teleport", Command_EurekaTeleport);
     RegConsoleCmd("1v1", Command_OneVsOne, "Change arena to 1v1");
     RegConsoleCmd("2v2", Command_TwoVsTwo, "Change arena to 2v2");
+    RegConsoleCmd("invite", Command_Invite, "Invite a player to your arena. Usage: !invite [player name]");
+    RegConsoleCmd("accept", Command_AcceptInvite, "Accept an arena invitation.");
+    RegConsoleCmd("acc", Command_AcceptInvite, "Accept an arena invitation.");
+    RegConsoleCmd("decline", Command_DeclineInvite, "Decline an arena invitation.");
+    RegConsoleCmd("dec", Command_DeclineInvite, "Decline an arena invitation.");
+    RegConsoleCmd("q", Command_ToggleQueue, "Toggle queue display in keyhint.");
 
     // Admin commands
     RegAdminCmd("koth", Command_Koth, ADMFLAG_BAN, "Change arena to KOTH Mode");
@@ -207,6 +228,9 @@ public void OnPluginStart()
     RegConsoleCmd("r", Command_Ready, "Mark yourself as ready for 2v2 match");
     
     AddCommandListener(Command_DropItem, "dropitem");
+    AddCommandListener(Command_SpecNavigation, "spec_next");
+    AddCommandListener(Command_SpecNavigation, "spec_prev");
+    AddCommandListener(Command_BlockSpectate, "spectate");
 
     // HUD synchronizers
     hm_HP           = CreateHudSynchronizer();
@@ -309,6 +333,13 @@ public void OnMapStart()
         }
 
         CreateTimer(1.0, Timer_SpecHudToAllArenas, _, TIMER_FLAG_NO_MAPCHANGE | TIMER_REPEAT);
+        CreateTimer(0.1, Timer_UpdateQueueKeyHint, _, TIMER_FLAG_NO_MAPCHANGE | TIMER_REPEAT);
+
+        // Create timer to show top rated online player every 5 minutes
+        g_hTopRatingTimer = CreateTimer(300.0, Timer_ShowTopRatedPlayer, _, TIMER_FLAG_NO_MAPCHANGE | TIMER_REPEAT);
+
+        // Create timer to update queue display every 10 seconds
+        CreateTimer(10.0, Timer_UpdateQueueDisplay, _, TIMER_FLAG_NO_MAPCHANGE | TIMER_REPEAT);
 
         if (g_bAutoCvar)
         {
@@ -336,7 +367,33 @@ public void OnMapStart()
         g_iPlayerWaiting[i] = false;
         g_bCanPlayerSwap[i] = true;
         g_bCanPlayerGetIntel[i] = true;
+        g_iPlayerInviteFrom[i] = 0;
+        g_iPlayerInviteTo[i] = 0;
+        g_fPlayerInviteTime[i] = 0.0;
+        g_fPlayerAddCooldown[i] = 0.0;
+        for (int classId = 1; classId <= 9; classId++)
+        {
+            g_iPlayerClassPoints[i][classId] = 0;
+            for (int oppClassId = 1; oppClassId <= 9; oppClassId++)
+            {
+                g_iPlayerClassRating[i][classId][oppClassId] = 0;
+                g_iPlayerMatchupCount[i][classId][oppClassId] = 0;
+            }
+        }
+        // g_bShowQueue is initialized in globals.sp as { true, ... }
+    }
 
+    // Initialize waiting lists for arenas
+    for (int i = 0; i <= MAXARENAS; i++)
+    {
+        if (g_alArenaWaitingList[i] == null)
+        {
+            g_alArenaWaitingList[i] = new ArrayList();
+        }
+        else
+        {
+            g_alArenaWaitingList[i].Clear();
+        }
     }
 
     for (int i = 0; i < MAXARENAS; i++)
@@ -351,6 +408,7 @@ public void OnMapStart()
 public void OnMapEnd()
 {
     delete g_hDBReconnectTimer;
+    delete g_hTopRatingTimer;
     g_bNoStats = gcvar_stats.BoolValue ? false : true;
 
     UnhookEvent("player_death", Event_PlayerDeath, EventHookMode_Pre);
@@ -404,6 +462,13 @@ public void OnClientCookiesCached(int client)
         g_bShowElo[client] = (StringToInt(cookieValue) == 1);
     else
         g_bShowElo[client] = true; // Default to enabled for new players
+
+    // Load queue display preference from cookie
+    g_hShowQueueCookie.Get(client, cookieValue, sizeof(cookieValue));
+    if (strlen(cookieValue) > 0)
+        g_bShowQueue[client] = (StringToInt(cookieValue) == 1);
+    else
+        g_bShowQueue[client] = true; // Default to enabled for new players
 }
 
 // Initialize basic client data when they connect (regardless of Steam status)
@@ -519,6 +584,10 @@ void handler_ConVarChange(Handle convar, const char[] oldValue, const char[] new
         g_bClearProjectiles = boolValue;
     else if (convar == gcvar_allowUnverifiedPlayers)
         g_bAllowUnverifiedPlayers = boolValue;
+    else if (convar == gcvar_vipQueuePriority)
+        g_bVipQueuePriority = boolValue;
+    else if (convar == g_cvarPlayArenaSound)
+        g_bPlayArenaSound = boolValue;
 }
 
 
@@ -658,18 +727,6 @@ Action Event_PlayerTeam(Event event, const char[] name, bool dontBroadcast)
     int newTeam = event.GetInt("team");
     if (IsValidClient(client) && newTeam == TEAM_SPEC)
     {
-        int player_arena = g_iPlayerArena[client];
-        int player_slot = g_iPlayerSlot[client];
-        
-        if (player_arena > 0 && player_slot > 0)
-        {
-            int max_active_slot = g_bFourPersonArena[player_arena] ? SLOT_FOUR : SLOT_TWO;
-            if (player_slot <= max_active_slot)
-            {
-                RemoveFromQueue(client, true);
-            }
-        }
-        
         CreateTimer(0.3, Timer_ChangeSpecTarget, GetClientUserId(client));
     }
     return Plugin_Continue;

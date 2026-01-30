@@ -10,6 +10,7 @@ void RegisterNatives()
     CreateNative("MGE_GetArenaCount", Native_GetArenaCount);
     CreateNative("MGE_GetArenaPlayer", Native_GetArenaPlayer);
     CreateNative("MGE_IsValidArena", Native_IsValidArena);
+    CreateNative("MGE_GetArenaStatus", Native_GetArenaStatus);
     CreateNative("MGE_AddPlayerToArena", Native_AddPlayerToArena);
     CreateNative("MGE_RemovePlayerFromArena", Native_RemovePlayerFromArena);
     CreateNative("MGE_IsPlayerReady", Native_IsPlayerReady);
@@ -17,6 +18,11 @@ void RegisterNatives()
     CreateNative("MGE_GetPlayerTeammate", Native_GetPlayerTeammate);
     CreateNative("MGE_ArenaHasGameMode", Native_ArenaHasGameMode);
     CreateNative("MGE_IsValidSlotForArena", Native_IsValidSlotForArena);
+    CreateNative("MGE_GetArenaScore", Native_GetArenaScore);
+    CreateNative("MGE_GetPlayerSlot", Native_GetPlayerSlot);
+    CreateNative("MGE_GetPlayerClassRating", Native_GetPlayerClassRating);
+    CreateNative("MGE_GetPlayerCurrentClassRating", Native_GetPlayerCurrentClassRating);
+    CreateNative("MGE_GetPlayerMatchupRating", Native_GetPlayerMatchupRating);
 }
 
 // ===== PLAYER INFORMATION NATIVES =====
@@ -91,6 +97,17 @@ int Native_IsValidArena(Handle plugin, int numParams)
 {
     int arena_index = GetNativeCell(1);
     return (arena_index >= 1 && arena_index <= g_iArenaCount);
+}
+
+// Gets the status of an arena
+int Native_GetArenaStatus(Handle plugin, int numParams)
+{
+    int arena_index = GetNativeCell(1);
+
+    if (arena_index < 1 || arena_index > g_iArenaCount)
+        return 0;
+
+    return g_iArenaStatus[arena_index];
 }
 
 // ===== ARENA MANAGEMENT NATIVES =====
@@ -310,3 +327,99 @@ int Native_GetArenaInfo(Handle plugin, int numParams)
     return true;
 }
 
+// Gets the score for a specific slot in an arena
+int Native_GetArenaScore(Handle plugin, int numParams)
+{
+    int arena_index = GetNativeCell(1);
+    int slot = GetNativeCell(2);
+    
+    if (arena_index < 1 || arena_index > g_iArenaCount)
+        return 0;
+    if (slot < SLOT_ONE || slot > SLOT_FOUR)
+        return 0;
+        
+    return g_iArenaScore[arena_index][slot];
+}
+
+// Gets a player's slot in their current arena
+int Native_GetPlayerSlot(Handle plugin, int numParams)
+{
+    int client = GetNativeCell(1);
+    
+    if (!IsValidClient(client))
+        return 0;
+        
+    return g_iPlayerSlot[client];
+}
+
+// Gets a player's class rating for a specific class
+int Native_GetPlayerClassRating(Handle plugin, int numParams)
+{
+    int client = GetNativeCell(1);
+    int classType = GetNativeCell(2);
+
+    if (!IsValidClient(client))
+        return 0;
+    if (classType < 1 || classType > 9)
+        return 0;
+
+    // Return average matchup rating for this class (average across all opponent classes)
+    int totalRating = 0;
+    int count = 0;
+    for (int oppClass = 1; oppClass <= 9; oppClass++)
+    {
+        if (g_iPlayerClassRating[client][classType][oppClass] > 0)
+        {
+            totalRating += g_iPlayerClassRating[client][classType][oppClass];
+            count++;
+        }
+    }
+    return (count > 0) ? (totalRating / count) : 0;
+}
+
+// Gets a player's class rating for their current class
+int Native_GetPlayerCurrentClassRating(Handle plugin, int numParams)
+{
+    int client = GetNativeCell(1);
+
+    if (!IsValidClient(client))
+        return 0;
+
+    int classId = view_as<int>(g_tfctPlayerClass[client]);
+    if (classId < 1 || classId > 9)
+        classId = view_as<int>(TF2_GetPlayerClass(client));
+    if (classId < 1 || classId > 9)
+        return 0;
+
+    // Return average matchup rating for current class (average across all opponent classes)
+    int totalRating = 0;
+    int count = 0;
+    for (int oppClass = 1; oppClass <= 9; oppClass++)
+    {
+        if (g_iPlayerClassRating[client][classId][oppClass] > 0)
+        {
+            totalRating += g_iPlayerClassRating[client][classId][oppClass];
+            count++;
+        }
+    }
+    return (count > 0) ? (totalRating / count) : 0;
+}
+
+// Gets a player's matchup rating for a specific class vs opponent class
+int Native_GetPlayerMatchupRating(Handle plugin, int numParams)
+{
+    int client = GetNativeCell(1);
+    int myClass = GetNativeCell(2);
+    int opponentClass = GetNativeCell(3);
+
+    if (!IsValidClient(client))
+        return 0;
+    if (myClass < 1 || myClass > 9)
+        return 0;
+    if (opponentClass < 1 || opponentClass > 9)
+        return 0;
+
+    int rating = g_iPlayerClassRating[client][myClass][opponentClass];
+    // Return 1500 (default) if rating is 0 (not initialized)
+    return (rating > 0) ? rating : 1500;
+}

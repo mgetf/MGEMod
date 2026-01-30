@@ -68,38 +68,33 @@ Action Timer_ChangeSpecTarget(Handle timer, int userid)
     {
         return Plugin_Stop;
     }
-    
-    // Only check if still in spectator team
-    if (GetClientTeam(client) != TEAM_SPEC)
+
+    // Only check if still in spectator
+    if (GetClientTeam(client) != TEAM_SPEC || g_iPlayerArena[client] > 0)
     {
         return Plugin_Stop;
-    }
-    
-    // Check if player is actively fighting (not waiting in queue)
-    // If they're in an active slot, don't update spec target
-    int player_arena = g_iPlayerArena[client];
-    int player_slot = g_iPlayerSlot[client];
-    if (player_arena > 0 && player_slot > 0)
-    {
-        int max_active_slot = g_bFourPersonArena[player_arena] ? SLOT_FOUR : SLOT_TWO;
-        if (player_slot <= max_active_slot)
-        {
-            // Player is in an active slot, shouldn't be spectating
-            return Plugin_Stop;
-        }
     }
 
     int target = GetEntPropEnt(client, Prop_Send, "m_hObserverTarget");
 
-    if (IsValidClient(target) && g_iPlayerArena[target])
+    // Check if current target is still valid and in arena
+    if (IsValidClient(target) && g_iPlayerArena[target] && IsPlayerAlive(target))
     {
-        g_iPlayerSpecTarget[client] = target;
-        UpdateHud(client);
+        // Target is valid, update HUD if target changed
+        if (g_iPlayerSpecTarget[client] != target)
+        {
+            g_iPlayerSpecTarget[client] = target;
+            UpdateHud(client);
+        }
     }
     else
     {
-        HideHud(client);
-        g_iPlayerSpecTarget[client] = 0;
+        // Target is invalid or not in arena anymore, hide HUD
+        if (g_iPlayerSpecTarget[client] != 0)
+        {
+            HideHud(client);
+            g_iPlayerSpecTarget[client] = 0;
+        }
     }
 
     return Plugin_Stop;
@@ -124,11 +119,73 @@ Action Timer_ShowAdv(Handle timer, int userid)
 
 // Handles spectator command to detect and update spectator target
 Action Command_Spec(int client, int args)
-{  
+{
     // Detecting spectator target
     if (!IsValidClient(client))
         return Plugin_Handled;
 
     CreateTimer(0.1, Timer_ChangeSpecTarget, GetClientUserId(client));
     return Plugin_Continue;
+}
+
+// Handles spec_next and spec_prev commands to cycle only through arena players
+Action Command_SpecNavigation(int client, const char[] command, int args)
+{
+    if (!IsValidClient(client) || GetClientTeam(client) != TEAM_SPEC || g_iPlayerArena[client] > 0)
+        return Plugin_Continue;
+
+    // Get current target
+    int current_target = GetEntPropEnt(client, Prop_Send, "m_hObserverTarget");
+
+    // Find all valid arena players
+    int valid_targets[MAXPLAYERS + 1];
+    int target_count = 0;
+
+    for (int i = 1; i <= MaxClients; i++)
+    {
+        if (IsValidClient(i) && g_iPlayerArena[i] > 0 && IsPlayerAlive(i))
+        {
+            valid_targets[target_count++] = i;
+        }
+    }
+
+    if (target_count == 0)
+        return Plugin_Continue;
+
+    // Find current target index
+    int current_index = -1;
+    for (int i = 0; i < target_count; i++)
+    {
+        if (valid_targets[i] == current_target)
+        {
+            current_index = i;
+            break;
+        }
+    }
+
+    // Determine next target based on command
+    int next_index;
+    if (StrEqual(command, "spec_next"))
+    {
+        next_index = (current_index + 1) % target_count;
+    }
+    else if (StrEqual(command, "spec_prev"))
+    {
+        next_index = (current_index - 1 + target_count) % target_count;
+    }
+    else
+    {
+        return Plugin_Continue;
+    }
+
+    // Set new target
+    int new_target = valid_targets[next_index];
+    SetEntPropEnt(client, Prop_Send, "m_hObserverTarget", new_target);
+    SetEntProp(client, Prop_Send, "m_iObserverMode", 4); // Third person mode
+
+    // Update HUD
+    g_iPlayerSpecTarget[client] = new_target;
+    UpdateHud(client);
+
+    return Plugin_Handled;
 }

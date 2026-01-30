@@ -21,7 +21,7 @@ void ProcessMatchCompletion(int arena_index, int winner1, int winner2, int loser
     // Format team names for announcement
     char winner_names[128];
     char loser_names[128];
-    
+
     if (g_bFourPersonArena[arena_index])
     {
         FormatTeamPlayerNames(winner1, winner2, winner_names, sizeof(winner_names));
@@ -32,33 +32,54 @@ void ProcessMatchCompletion(int arena_index, int winner1, int winner2, int loser
         GetClientName(winner1, winner_names, sizeof(winner_names));
         GetClientName(loser1, loser_names, sizeof(loser_names));
     }
-    
-    // Announce match result
-    MC_PrintToChatAll("%t", "XdefeatsY", winner_names, g_iArenaScore[arena_index][winner_team_slot], 
-                      loser_names, g_iArenaScore[arena_index][loser_team_slot], fraglimit, g_sArenaName[arena_index]);
-    
-    // Call API forwards for match end
-    if (!g_bFourPersonArena[arena_index])
+
+    // Calculate duel duration
+    char duel_time[32] = "";
+    if (g_iArenaDuelStartTime[arena_index] > 0)
     {
-        CallForward_On1v1MatchEnd(arena_index, winner1, loser1, g_iArenaScore[arena_index][winner_team_slot], g_iArenaScore[arena_index][loser_team_slot]);
+        int currentTime = GetTime();
+        int elapsedTime = currentTime - g_iArenaDuelStartTime[arena_index];
+        int minutes = elapsedTime / 60;
+        int seconds = elapsedTime % 60;
+        Format(duel_time, sizeof(duel_time), "%02dм %02dс", minutes, seconds);
     }
     else
     {
-        int winning_team = (winner_team_slot == SLOT_ONE) ? TEAM_RED : TEAM_BLU;
-        CallForward_On2v2MatchEnd(arena_index, winning_team, g_iArenaScore[arena_index][winner_team_slot], g_iArenaScore[arena_index][loser_team_slot], 
-                                g_iArenaQueue[arena_index][SLOT_ONE], g_iArenaQueue[arena_index][SLOT_THREE],
-                                g_iArenaQueue[arena_index][SLOT_TWO], g_iArenaQueue[arena_index][SLOT_FOUR]);
+        Format(duel_time, sizeof(duel_time), "00м 00с");
     }
+
+    // Announce match result with duel time
+    MC_PrintToChatAll("%t", "XdefeatsY", winner_names, g_iArenaScore[arena_index][winner_team_slot],
+                      loser_names, g_iArenaScore[arena_index][loser_team_slot], fraglimit, g_sArenaName[arena_index], duel_time);
+    
+    // Call API forwards for match end (This is now handled asynchronously in sql.sp after the duel is logged)
     
     // Handle ELO calculations
     if (!g_bNoStats)
     {
         if (!g_bFourPersonArena[arena_index])
-            CalcELO(winner1, loser1);
+        {
+            // Call forward to allow blocking ELO calculation
+            Action result = CallForward_OnMatchELOCalculation(arena_index, winner1, loser1, g_iArenaScore[arena_index][winner_team_slot], g_iArenaScore[arena_index][loser_team_slot]);
+            if (result == Plugin_Continue)
+            {
+                CalcELO(winner1, loser1);
+            }
+        }
         else
-            CalcELO2(winner1, winner2, loser1, loser2);
+        {
+            // Call forward to allow blocking 2v2 ELO calculation
+            Action result = CallForward_OnMatch2v2ELOCalculation(arena_index, winner1, winner2, loser1, loser2, g_iArenaScore[arena_index][winner_team_slot], g_iArenaScore[arena_index][loser_team_slot]);
+            if (result == Plugin_Continue)
+            {
+                CalcELO2(winner1, winner2, loser1, loser2);
+            }
+        }
     }
     
+    // Reset duel start time since match is completed
+    g_iArenaDuelStartTime[arena_index] = 0;
+
     // Handle post-match queue rotation and timers
     HandlePostMatchQueueRotation(arena_index, loser1, loser2);
 }
@@ -75,7 +96,7 @@ void HandlePostMatchQueueRotation(int arena_index, int loser1, int loser2)
         if (g_iArenaQueue[arena_index][SLOT_TWO + 1])
         {
             RemoveFromQueue(loser1, false, true);
-            AddInQueue(loser1, arena_index, false, 0, false);
+            AddLoserToQueue(loser1, arena_index); // Special function for losers
         } 
         else 
         {
@@ -89,13 +110,13 @@ void HandlePostMatchQueueRotation(int arena_index, int loser1, int loser2)
         {
             RemoveFromQueue(loser2, false, true);
             RemoveFromQueue(loser1, false, true);
-            AddInQueue(loser2, arena_index, false, 0, false);
-            AddInQueue(loser1, arena_index, false, 0, false);
+            AddLoserToQueue(loser2, arena_index); // Special function for losers
+            AddLoserToQueue(loser1, arena_index); // Special function for losers
         }
         else if (g_iArenaQueue[arena_index][SLOT_FOUR + 1])
         {
             RemoveFromQueue(loser1, false, true);
-            AddInQueue(loser1, arena_index, false, 0, false);
+            AddLoserToQueue(loser1, arena_index); // Special function for losers
         }
         else 
         {

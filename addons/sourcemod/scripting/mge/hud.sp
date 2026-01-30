@@ -11,33 +11,15 @@ void UpdateHud(int client)
     bool is_spectator = false;
     
     // Determine arena and role
-    // Check if player is in an ACTIVE slot (not waiting in queue)
-    int player_arena = g_iPlayerArena[client];
-    int player_slot = g_iPlayerSlot[client];
-    bool is_active_player = false;
-    
-    if (player_arena > 0 && player_slot > 0)
+    if (g_iPlayerArena[client] > 0)
     {
-        // Determine if this is an active slot or a queue slot
-        int max_active_slot = g_bFourPersonArena[player_arena] ? SLOT_FOUR : SLOT_TWO;
-        is_active_player = (player_slot <= max_active_slot);
-    }
-    
-    if (is_active_player)
-    {
-        // Player is actively fighting in arena
-        arena_index = player_arena;
+        // Player in arena
+        arena_index = g_iPlayerArena[client];
     }
     else if (g_iPlayerSpecTarget[client] > 0 && IsValidClient(g_iPlayerSpecTarget[client]))
     {
-        // Spectator (or queued player) watching someone
+        // Spectator watching someone
         arena_index = g_iPlayerArena[g_iPlayerSpecTarget[client]];
-        is_spectator = true;
-    }
-    else if (player_arena > 0)
-    {
-        // Queued player not spectating anyone - show their queued arena
-        arena_index = player_arena;
         is_spectator = true;
     }
     else
@@ -120,21 +102,25 @@ void ShowCriticalGameInfo(int client, int arena_index)
         if (g_bPlayerHasIntel[client])
         {
             Format(hud_text, sizeof(hud_text), "%T", "YouHaveTheIntel", client);
+            ClearSyncHud(client, hm_HP);
             ShowSyncHudText(client, hm_HP, hud_text, g_iPlayerHP[client]);
         }
         else if (g_bFourPersonArena[arena_index] && g_bPlayerHasIntel[client_teammate])
         {
             Format(hud_text, sizeof(hud_text), "%T", "TeammateHasTheIntel", client);
+            ClearSyncHud(client, hm_HP);
             ShowSyncHudText(client, hm_HP, hud_text, g_iPlayerHP[client]);
         }
         else if (g_bPlayerHasIntel[client_foe] || (g_bFourPersonArena[arena_index] && g_bPlayerHasIntel[client_foe2]))
         {
             Format(hud_text, sizeof(hud_text), "%T", "EnemyHasTheIntel", client);
+            ClearSyncHud(client, hm_HP);
             ShowSyncHudText(client, hm_HP, hud_text, g_iPlayerHP[client]);
         }
         else
         {
             Format(hud_text, sizeof(hud_text), "%T", "GetTheIntel", client);
+            ClearSyncHud(client, hm_HP);
             ShowSyncHudText(client, hm_HP, hud_text, g_iPlayerHP[client]);
         }
     }
@@ -152,12 +138,14 @@ void ShowCriticalGameInfo(int client, int arena_index)
                 SetHudTextParams(0.01, 0.80, HUDFADEOUTTIME, 255, 0, 0, 255); // Red
             else
                 SetHudTextParams(0.01, 0.80, HUDFADEOUTTIME, 255, 255, 255, 255); // White
-            
+
+            ClearSyncHud(client, hm_HP);
             ShowSyncHudText(client, hm_HP, "Health : %d", g_iPlayerHP[client]);
         }
         else
         {
             SetHudTextParams(0.01, 0.80, HUDFADEOUTTIME, 255, 255, 255, 255);
+            ClearSyncHud(client, hm_HP);
             ShowSyncHudText(client, hm_HP, "", g_iPlayerHP[client]);
         }
     }
@@ -168,6 +156,7 @@ void ShowCriticalGameInfo(int client, int arena_index)
         char hp_report[128];
         Format(hp_report, sizeof(hp_report), "%N : %d", client_teammate, g_iPlayerHP[client_teammate]);
         SetHudTextParams(0.01, 0.80, HUDFADEOUTTIME, 255, 255, 255, 255);
+        ClearSyncHud(client, hm_TeammateHP);
         ShowSyncHudText(client, hm_TeammateHP, hp_report);
     }
 }
@@ -206,6 +195,7 @@ void ShowFullHud(int client, int arena_index, bool is_spectator)
         }
 
         SetHudTextParams(0.01, 0.80, HUDFADEOUTTIME, 255, 255, 255, 255);
+        ClearSyncHud(client, hm_HP);
         ShowSyncHudText(client, hm_HP, hp_report);
     }
     else
@@ -214,7 +204,7 @@ void ShowFullHud(int client, int arena_index, bool is_spectator)
         ShowCriticalGameInfo(client, arena_index);
     }
 
-    // Both players and spectators get score display
+    // Both players and spectators get score display (now includes battle timer in arena name)
     char report[256];
     SetHudTextParams(0.01, 0.01, HUDFADEOUTTIME, 255, 255, 255, 255);
     BuildArenaScoreReport(arena_index, client, is_spectator, report, sizeof(report));
@@ -235,12 +225,12 @@ void UpdateHudForArena(int arena_index)
             UpdateHud(g_iArenaQueue[arena_index][i]);
         }
     }
-    
+
     // Update HUD for all spectators watching this arena
     for (int i = 1; i <= MaxClients; i++)
     {
-        if (IsValidClient(i) && GetClientTeam(i) == TEAM_SPEC && 
-            g_iPlayerSpecTarget[i] > 0 && 
+        if (IsValidClient(i) && GetClientTeam(i) == TEAM_SPEC &&
+            g_iPlayerSpecTarget[i] > 0 &&
             g_iPlayerArena[g_iPlayerSpecTarget[i]] == arena_index)
         {
             UpdateHud(i);
@@ -265,9 +255,66 @@ void HideHud(int client)
 
     ClearSyncHud(client, hm_Score);
     ClearSyncHud(client, hm_HP);
+    ClearQueueKeyHintText(client);
 }
 
 // ===== HUD FORMATTING FUNCTIONS =====
+
+// Builds rating display text that includes overall and current matchup rating vs opponent
+void FormatPlayerRatingSegment(int player, char[] output, int output_size)
+{
+    int classId = view_as<int>(g_tfctPlayerClass[player]);
+    if (classId < 1 || classId > 9)
+        classId = view_as<int>(TF2_GetPlayerClass(player));
+
+    // Get opponent from arena (for 2v2, get first opponent)
+    int opponent = 0;
+    int arena_index = g_iPlayerArena[player];
+    if (arena_index > 0)
+    {
+        int player_slot = g_iPlayerSlot[player];
+        // For 2v2, get first opponent (slot 2 or 4 for red team, slot 1 or 3 for blue team)
+        if (g_bFourPersonArena[arena_index])
+        {
+            if (player_slot == SLOT_ONE || player_slot == SLOT_THREE)
+                opponent = g_iArenaQueue[arena_index][SLOT_TWO];
+            else
+                opponent = g_iArenaQueue[arena_index][SLOT_ONE];
+        }
+        else
+        {
+            int foe_slot = (player_slot == SLOT_ONE) ? SLOT_TWO : SLOT_ONE;
+            opponent = g_iArenaQueue[arena_index][foe_slot];
+        }
+    }
+
+    if (opponent > 0 && IsValidClient(opponent) && classId >= 1 && classId <= 9)
+    {
+        int oppClassId = view_as<int>(g_tfctPlayerClass[opponent]);
+        if (oppClassId < 1 || oppClassId > 9)
+            oppClassId = view_as<int>(TF2_GetPlayerClass(opponent));
+
+        if (oppClassId >= 1 && oppClassId <= 9)
+    {
+        char className[16];
+            char oppClassName[16];
+        strcopy(className, sizeof(className), TFClassToString(view_as<TFClassType>(classId)));
+            strcopy(oppClassName, sizeof(oppClassName), TFClassToString(view_as<TFClassType>(oppClassId)));
+            
+            int matchupRating = g_iPlayerClassRating[player][classId][oppClassId];
+            if (matchupRating == 0)
+                matchupRating = 1500; // Default if not set
+            
+            char matchupLabel[32];
+            SetGlobalTransTarget(player);
+            Format(matchupLabel, sizeof(matchupLabel), "%t", "MatchupLabel");
+            Format(output, output_size, "%d, %s: %d", g_iPlayerRating[player], matchupLabel, matchupRating);
+        return;
+        }
+    }
+
+    Format(output, output_size, "%d", g_iPlayerRating[player]);
+}
 
 // Formats a single player's score line with optional ELO display
 void FormatPlayerScoreLine(int player, int score, bool show_elo, char[] output, int output_size)
@@ -281,7 +328,11 @@ void FormatPlayerScoreLine(int player, int score, bool show_elo, char[] output, 
     if (g_bNoStats || g_bNoDisplayRating || !show_elo)
         Format(output, output_size, "%N : %d", player, score);
     else
-        Format(output, output_size, "%N (%d): %d", player, g_iPlayerRating[player], score);
+    {
+        char ratingText[64];
+        FormatPlayerRatingSegment(player, ratingText, sizeof(ratingText));
+        Format(output, output_size, "%N (%s): %d", player, ratingText, score);
+    }
 }
 
 // Formats a team score line for 2v2 with optional ELO display  
@@ -302,7 +353,13 @@ void FormatTeamScoreLine(int player1, int player2, int score, bool show_elo, boo
         if (g_bNoStats || g_bNoDisplayRating || !show_elo || !show_2v2_elo)
             Format(output, output_size, "«%N» and «%N» : %d", player1, player2, score);
         else
-            Format(output, output_size, "«%N» and «%N» (%d): %d", player1, player2, g_iPlayerRating[player1], score);
+        {
+            char ratingText1[64];
+            char ratingText2[64];
+            FormatPlayerRatingSegment(player1, ratingText1, sizeof(ratingText1));
+            FormatPlayerRatingSegment(player2, ratingText2, sizeof(ratingText2));
+            Format(output, output_size, "«%N» (%s) and «%N» (%s): %d", player1, ratingText1, player2, ratingText2, score);
+        }
     }
     else if (valid1)
     {
@@ -352,6 +409,20 @@ void BuildArenaScoreReport(int arena_index, int client, bool for_spectator, char
     
     char header[128];
     FormatArenaHeader(arena_name, fraglimit, is_bball, for_spectator, g_iArenaStatus[arena_index], header, sizeof(header));
+
+    // Add battle timer to arena header if fight is active
+    if (g_iArenaStatus[arena_index] == AS_FIGHT && g_iArenaDuelStartTime[arena_index] > 0)
+    {
+        int currentTime = GetTime();
+        int elapsedTime = currentTime - g_iArenaDuelStartTime[arena_index];
+        int minutes = elapsedTime / 60;
+        int seconds = elapsedTime % 60;
+
+        char timer_str[16];
+        Format(timer_str, sizeof(timer_str), " [%02d:%02d]", minutes, seconds);
+        StrCat(header, sizeof(header), timer_str);
+    }
+
     strcopy(output, output_size, header);
     
     bool show_elo = g_bShowElo[client];
@@ -412,4 +483,162 @@ Action Command_ToggleHud(int client, int args)
     Format(status_text, sizeof(status_text), "%T", g_bShowHud[client] ? "EnabledLabel" : "DisabledLabel", client);
     MC_PrintToChat(client, "%t", "HudToggle", status_text);
     return Plugin_Handled;
+}
+
+// ===== QUEUE DISPLAY IN KEYHINTTEXT =====
+
+// Shows arena queue in KeyHintText for players in arena
+void ShowQueueInKeyHintText(int client, int arena_index)
+{
+    // Check if player wants to see queue
+    if (!g_bShowQueue[client])
+    {
+        ClearQueueKeyHintText(client);
+        return;
+    }
+
+    char queueMessage[512] = "";
+
+    // Get queue start slot
+    int queueStart = g_bFourPersonArena[arena_index] ? SLOT_FOUR + 1 : SLOT_TWO + 1;
+
+    // Build queue list
+    for (int i = queueStart; i < MAXPLAYERS; i++)
+    {
+        if (g_iArenaQueue[arena_index][i] != 0)
+        {
+            int queuedPlayer = g_iArenaQueue[arena_index][i];
+            if (IsValidClient(queuedPlayer))
+            {
+                char playerName[MAX_NAME_LENGTH];
+                GetClientName(queuedPlayer, playerName, sizeof(playerName));
+
+                // Add [VIP] prefix if player is VIP
+                char vipPrefix[8] = "";
+                if (IsPlayerVipForQueue(queuedPlayer))
+                {
+                    strcopy(vipPrefix, sizeof(vipPrefix), "[VIP] ");
+                }
+
+                // Calculate position in queue
+                int position = i - queueStart + 1;
+
+                char queueLabel[96];
+                Format(queueLabel, sizeof(queueLabel), "%T", "QueueLabelArena", client, g_sArenaName[arena_index]);
+
+                if (strlen(queueMessage) == 0)
+                {
+                    Format(queueMessage, sizeof(queueMessage), "%s\n[%d] %s%s", queueLabel, position, vipPrefix, playerName);
+                }
+                else
+                {
+                    Format(queueMessage, sizeof(queueMessage), "%s\n[%d] %s%s", queueMessage, position, vipPrefix, playerName);
+                }
+
+                // Limit to prevent message overflow (show max 5 players)
+                if (position >= 5)
+                {
+                    Format(queueMessage, sizeof(queueMessage), "%s\n...", queueMessage);
+                    break;
+                }
+            }
+        }
+    }
+
+    // Always send KeyHintText message (empty if no queue)
+    Client_PrintKeyHintText(client, "%s", queueMessage);
+}
+
+// Timer callback to update queue keyhint every 10 seconds
+Action Timer_UpdateQueueKeyHint(Handle timer)
+{
+    for (int i = 1; i <= g_iArenaCount; i++)
+    {
+        UpdateQueueKeyHintText(i);
+    }
+    return Plugin_Continue;
+}
+
+// Updates KeyHintText queue display for all players in arena
+void UpdateQueueKeyHintText(int arena_index)
+{
+    if (arena_index <= 0 || arena_index > g_iArenaCount)
+        return;
+
+    // Update for all players in the arena
+    for (int i = SLOT_ONE; i <= (g_bFourPersonArena[arena_index] ? SLOT_FOUR : SLOT_TWO); i++)
+    {
+        int player = g_iArenaQueue[arena_index][i];
+        if (player != 0 && IsValidClient(player))
+        {
+            if (g_bShowQueue[player])
+                ShowQueueInKeyHintText(player, arena_index);
+            else
+                ClearQueueKeyHintText(player);
+        }
+    }
+
+    // Update for all players waiting in this arena's queue
+    int queueStart = g_bFourPersonArena[arena_index] ? SLOT_FOUR + 1 : SLOT_TWO + 1;
+    for (int i = queueStart; i < MAXPLAYERS; i++)
+    {
+        int player = g_iArenaQueue[arena_index][i];
+        if (player != 0 && IsValidClient(player))
+        {
+            if (g_bShowQueue[player])
+                ShowQueueInKeyHintText(player, arena_index);
+            else
+                ClearQueueKeyHintText(player);
+        }
+    }
+}
+
+// Clears KeyHintText queue display for a player
+void ClearQueueKeyHintText(int client)
+{
+    // Send empty KeyHintText to clear it
+    Client_PrintKeyHintText(client, "");
+}
+
+// Timer function to update queue display every 10 seconds
+Action Timer_UpdateQueueDisplay(Handle timer)
+{
+    // Update queue display for all arenas
+    for (int i = 1; i <= g_iArenaCount; i++)
+    {
+        UpdateQueueKeyHintText(i);
+    }
+    
+    return Plugin_Continue;
+}
+
+// Helper function to print KeyHintText with proper protobuf support
+stock bool Client_PrintKeyHintText(int client, const char[] format, any ...)
+{
+    Handle userMessage = StartMessageOne("KeyHintText", client);
+
+    if (userMessage == INVALID_HANDLE)
+    {
+        return false;
+    }
+
+    char buffer[512];
+
+    SetGlobalTransTarget(client);
+    VFormat(buffer, sizeof(buffer), format, 3);
+
+    if (GetFeatureStatus(FeatureType_Native, "GetUserMessageType") == FeatureStatus_Available
+        && GetUserMessageType() == UM_Protobuf)
+    {
+        PbAddString(userMessage, "hints", buffer);
+    }
+    else
+    {
+        BfWriteByte(userMessage, 1);
+        BfWriteString(userMessage, buffer);
+    }
+
+    EndMessage();
+
+    return true;
 }

@@ -1,5 +1,16 @@
 // ===== PLUGIN CORE LIFECYCLE =====
 
+// Timer callback to initialize public invite arrays
+public Action Timer_InitializePublicInvites(Handle timer)
+{
+    for (int i = 0; i <= MAXARENAS; i++)
+    {
+        g_iPublicInviteArena[i] = 0;
+        g_fPublicInviteTime[i] = 0.0;
+    }
+    return Plugin_Stop;
+}
+
 // Load and parse spawn point configurations from map-specific config files
 bool LoadSpawnPoints()
 {
@@ -210,8 +221,180 @@ void UpdateArenaName(int arena)
     Format(g_sArenaName[arena], sizeof(g_sArenaName), "%s [%s %s]", g_sArenaOriginalName[arena], mode, type);
 }
 
+// Reset class point tracking for all active players in an arena
+void ResetClassPointsForArena(int arena_index)
+{
+    int maxSlots = g_bFourPersonArena[arena_index] ? SLOT_FOUR : SLOT_TWO;
+    for (int slot = SLOT_ONE; slot <= maxSlots; slot++)
+    {
+        int player = g_iArenaQueue[arena_index][slot];
+        if (player != 0 && IsValidClient(player))
+        {
+            for (int classId = 1; classId <= 9; classId++)
+            {
+                g_iPlayerClassPoints[player][classId] = 0;
+                for (int oppClassId = 1; oppClassId <= 9; oppClassId++)
+                {
+                    g_iPlayerMatchupCount[player][classId][oppClassId] = 0;
+                }
+            }
+        }
+    }
+}
+
 
 // ===== QUEUE MANAGEMENT =====
+
+// Check if a player has VIP queue priority (admin flags 'a' or 'z')
+bool IsPlayerVipForQueue(int client)
+{
+    if (!g_bVipQueuePriority)
+        return false;
+
+    AdminId admin = GetUserAdmin(client);
+    if (admin == INVALID_ADMIN_ID)
+        return false;
+
+    return (GetAdminFlag(admin, Admin_Generic, Access_Effective) ||
+            GetAdminFlag(admin, Admin_Root, Access_Effective));
+}
+
+// Assign appropriate slot for player considering VIP priority and insert into queue
+int AssignQueueSlotAndInsert(int client, int arena_index, int playerPrefTeam, int forcedSlot)
+{
+    // Handle forced slot assignment (used by API natives)
+    if (forcedSlot > 0)
+    {
+        // Validate forced slot for arena type
+        if (!IsValidSlotForArena(arena_index, forcedSlot))
+            return 0; // Invalid slot
+
+        // Check if forced slot is already occupied
+        if (g_iArenaQueue[arena_index][forcedSlot] != 0)
+            return 0; // Slot occupied
+
+        return forcedSlot;
+    }
+
+    bool isVip = IsPlayerVipForQueue(client);
+    int maxActiveSlot = g_bFourPersonArena[arena_index] ? SLOT_FOUR : SLOT_TWO;
+
+    // For 2v2 arenas, handle team preference for active slots (team switching)
+    if (g_bFourPersonArena[arena_index] && playerPrefTeam != 0)
+    {
+        // This is team switching for active players only
+        if (playerPrefTeam == TEAM_RED)
+        {
+            // Try main RED slots first
+            if (!g_iArenaQueue[arena_index][SLOT_ONE])
+                return SLOT_ONE;
+            else if (!g_iArenaQueue[arena_index][SLOT_THREE])
+                return SLOT_THREE;
+            else
+            {
+                // RED slots full, put in regular queue with VIP priority
+                return InsertIntoQueueWithVipPriority(arena_index, SLOT_FOUR + 1, isVip);
+            }
+        }
+        else if (playerPrefTeam == TEAM_BLU)
+        {
+            // Try main BLU slots first
+            if (!g_iArenaQueue[arena_index][SLOT_TWO])
+                return SLOT_TWO;
+            else if (!g_iArenaQueue[arena_index][SLOT_FOUR])
+                return SLOT_FOUR;
+            else
+            {
+                // BLU slots full, put in regular queue with VIP priority
+                return InsertIntoQueueWithVipPriority(arena_index, SLOT_FOUR + 1, isVip);
+            }
+        }
+    }
+    else
+    {
+        // Regular queue assignment: fill active slots first, then queue with VIP priority
+        for (int slot = SLOT_ONE; slot <= maxActiveSlot; slot++)
+        {
+            if (!g_iArenaQueue[arena_index][slot])
+                return slot;
+        }
+
+        return InsertIntoQueueWithVipPriority(arena_index, maxActiveSlot + 1, isVip);
+    }
+    return 0;
+}
+
+// Insert player into queue with VIP priority (shifts queue as needed)
+int InsertIntoQueueWithVipPriority(int arena_index, int startSlot, bool isVip)
+{
+    int insertSlot = startSlot;
+
+    if (isVip)
+    {
+        // VIP gets priority - find insertion point before first non-VIP player
+        while (g_iArenaQueue[arena_index][insertSlot])
+        {
+            int queuedPlayer = g_iArenaQueue[arena_index][insertSlot];
+            if (!IsPlayerVipForQueue(queuedPlayer))
+                break; // Found first non-VIP, insert before them
+            insertSlot++;
+        }
+    }
+    else
+    {
+        // Non-VIP goes to end of queue
+        while (g_iArenaQueue[arena_index][insertSlot])
+            insertSlot++;
+    }
+
+    // If we found an occupied slot for VIP insertion, shift the queue
+    if (g_iArenaQueue[arena_index][insertSlot] != 0)
+    {
+        // Find the last occupied slot to know how far to shift
+        int lastSlot = insertSlot;
+        while (g_iArenaQueue[arena_index][lastSlot])
+            lastSlot++;
+
+        // Shift all players from lastSlot down to insertSlot one position forward
+        for (int shiftSlot = lastSlot; shiftSlot > insertSlot; shiftSlot--)
+        {
+            g_iArenaQueue[arena_index][shiftSlot] = g_iArenaQueue[arena_index][shiftSlot - 1];
+            if (g_iArenaQueue[arena_index][shiftSlot] != 0)
+            {
+                g_iPlayerSlot[g_iArenaQueue[arena_index][shiftSlot]] = shiftSlot;
+            }
+        }
+        g_iArenaQueue[arena_index][insertSlot] = 0; // Clear the insert slot for the new player
+    }
+
+    return insertSlot;
+}
+
+// Add a loser back to queue without VIP priority (goes to end of queue)
+void AddLoserToQueue(int client, int arena_index)
+{
+    if (!IsValidClient(client) || arena_index <= 0 || arena_index > g_iArenaCount)
+        return;
+
+    // Remove any existing invites for this player
+    ClearPlayerInvites(client);
+
+    // Find the end of the queue
+    int queueSlot = g_bFourPersonArena[arena_index] ? SLOT_FOUR + 1 : SLOT_TWO + 1;
+    while (g_iArenaQueue[arena_index][queueSlot])
+        queueSlot++;
+
+    // Add to end of queue (no VIP priority)
+    g_iPlayerArena[client] = arena_index;
+    g_iPlayerSlot[client] = queueSlot;
+    g_iArenaQueue[arena_index][queueSlot] = client;
+
+    // Set player to spectator if not already
+    if (GetClientTeam(client) != TEAM_SPEC)
+        ChangeClientTeam(client, TEAM_SPEC);
+
+    UpdateHudForArena(arena_index);
+}
 
 // Remove player from arena queue with optional statistics calculation and spectator handling
 // TODO: refactor this crap
@@ -234,6 +417,17 @@ void RemoveFromQueue(int client, bool calcstats = false, bool specfix = false)
     g_iPlayerSlot[client] = 0;
     g_iArenaQueue[arena_index][player_slot] = 0;
     g_iPlayerHandicap[client] = 0;
+    g_bPlayerAddedViaWadd[client] = false;
+    
+    // Clear public invite if this player created one
+    if (g_iPublicInviteArena[arena_index] == client)
+    {
+        g_iPublicInviteArena[arena_index] = 0;
+        g_fPublicInviteTime[arena_index] = 0.0;
+    }
+
+    // Update keyhint immediately when queue changes
+    UpdateQueueKeyHintText(arena_index);
 
     if (IsValidClient(client) && GetClientTeam(client) != TEAM_SPEC)
     {
@@ -338,7 +532,18 @@ void RemoveFromQueue(int client, bool calcstats = false, bool specfix = false)
                         CalcELO(foe, client);
                         if (IsValidClient(foe2))
                             CalcELO(foe2, client);
-                        MC_PrintToChatAll("%t", "XdefeatsYearly", foe_name, g_iArenaScore[arena_index][foe_team_slot], player_name, g_iArenaScore[arena_index][player_team_slot], g_sArenaName[arena_index]);
+                        // Calculate duel duration
+                        char duel_time[32] = "";
+                        if (g_iArenaDuelStartTime[arena_index] > 0)
+                        {
+                            int currentTime = GetTime();
+                            int elapsedTime = currentTime - g_iArenaDuelStartTime[arena_index];
+                            int minutes = elapsedTime / 60;
+                            int seconds = elapsedTime % 60;
+                            Format(duel_time, sizeof(duel_time), "%02dм %02dс", minutes, seconds);
+                        }
+
+                        MC_PrintToChatAll("%t", "XdefeatsYearly", foe_name, g_iArenaScore[arena_index][foe_team_slot], player_name, g_iArenaScore[arena_index][player_team_slot], g_sArenaName[arena_index], duel_time);
                     }
                 }
             }
@@ -356,6 +561,13 @@ void RemoveFromQueue(int client, bool calcstats = false, bool specfix = false)
 
                 SendArenaJoinMessage(playername, g_iPlayerRating[next_client], g_sArenaName[arena_index], !g_bNoStats && !g_bNoDisplayRating && g_bShowElo[next_client], IsPlayerEligibleForElo(next_client));
                 
+                // Play sound if player was added via wadd
+                if (g_bPlayerAddedViaWadd[next_client] && g_bPlayArenaSound)
+                {
+                    PlayArenaSound(next_client);
+                    g_bPlayerAddedViaWadd[next_client] = false;
+                }
+                
                 UpdateHudForArena(arena_index);
             } else {
                 if (IsValidClient(foe) && IsFakeClient(foe))
@@ -372,7 +584,9 @@ void RemoveFromQueue(int client, bool calcstats = false, bool specfix = false)
                 }
 
                 g_iArenaStatus[arena_index] = AS_IDLE;
-                
+                // Reset duel start time since arena became idle due to insufficient players
+                g_iArenaDuelStartTime[arena_index] = 0;
+
                 UpdateHudForArena(arena_index);
                 return;
             }
@@ -418,7 +632,18 @@ void RemoveFromQueue(int client, bool calcstats = false, bool specfix = false)
                     if (g_iArenaScore[arena_index][foe_slot] >= g_iArenaEarlyLeave[arena_index])
                     {
                         CalcELO(foe, client);
-                        MC_PrintToChatAll("%t", "XdefeatsYearly", foe_name, g_iArenaScore[arena_index][foe_slot], player_name, g_iArenaScore[arena_index][player_slot], g_sArenaName[arena_index]);
+                        // Calculate duel duration
+                        char duel_time[32] = "";
+                        if (g_iArenaDuelStartTime[arena_index] > 0)
+                        {
+                            int currentTime = GetTime();
+                            int elapsedTime = currentTime - g_iArenaDuelStartTime[arena_index];
+                            int minutes = elapsedTime / 60;
+                            int seconds = elapsedTime % 60;
+                            Format(duel_time, sizeof(duel_time), "%02dм %02dс", minutes, seconds);
+                        }
+
+                        MC_PrintToChatAll("%t", "XdefeatsYearly", foe_name, g_iArenaScore[arena_index][foe_slot], player_name, g_iArenaScore[arena_index][player_slot], g_sArenaName[arena_index], duel_time);
                     }
                 }
             }
@@ -436,6 +661,13 @@ void RemoveFromQueue(int client, bool calcstats = false, bool specfix = false)
 
                 SendArenaJoinMessage(playername, g_iPlayerRating[next_client], g_sArenaName[arena_index], !g_bNoStats && !g_bNoDisplayRating && g_bShowElo[next_client], IsPlayerEligibleForElo(next_client));
                 
+                // Play sound if player was added via wadd
+                if (g_bPlayerAddedViaWadd[next_client] && g_bPlayArenaSound)
+                {
+                    PlayArenaSound(next_client);
+                    g_bPlayerAddedViaWadd[next_client] = false;
+                }
+                
                 UpdateHudForArena(arena_index);
             } else {
                 if (IsValidClient(foe) && IsFakeClient(foe))
@@ -446,7 +678,9 @@ void RemoveFromQueue(int client, bool calcstats = false, bool specfix = false)
                 }
 
                 g_iArenaStatus[arena_index] = AS_IDLE;
-                
+                // Reset duel start time since arena became idle due to insufficient players
+                g_iArenaDuelStartTime[arena_index] = 0;
+
                 UpdateHudForArena(arena_index);
                 return;
             }
@@ -464,9 +698,83 @@ void RemoveFromQueue(int client, bool calcstats = false, bool specfix = false)
     }
     
     UpdateHudForArena(arena_index);
-    
+
+    // Check if we should auto-add players from waiting list
+    CheckWaitingList(arena_index);
+
     // Call OnPlayerArenaRemoved forward
     CallForward_OnPlayerArenaRemoved(client, arena_index);
+}
+
+// Check and auto-add players from waiting list when arena becomes available
+void CheckWaitingList(int arena_index)
+{
+    if (g_alArenaWaitingList[arena_index] == null || g_alArenaWaitingList[arena_index].Length == 0)
+        return;
+
+    // Add players from waiting list when arena has at least one player
+    int player_count = 0;
+    int slot_one = g_iArenaQueue[arena_index][SLOT_ONE];
+    int slot_two = g_iArenaQueue[arena_index][SLOT_TWO];
+    
+    if (slot_one) player_count++;
+    if (slot_two) player_count++;
+    
+    if (g_bFourPersonArena[arena_index])
+    {
+        int slot_three = g_iArenaQueue[arena_index][SLOT_THREE];
+        int slot_four = g_iArenaQueue[arena_index][SLOT_FOUR];
+        if (slot_three) player_count++;
+        if (slot_four) player_count++;
+    }
+    
+    // Add all players from waiting list when arena has at least one player
+    bool should_add_players = (player_count >= 1) && (g_alArenaWaitingList[arena_index].Length > 0);
+
+    while (should_add_players && g_alArenaWaitingList[arena_index].Length > 0)
+    {
+        // Get first player from waiting list
+        int waiting_player = g_alArenaWaitingList[arena_index].Get(0);
+        g_alArenaWaitingList[arena_index].Erase(0);
+
+        if (IsValidClient(waiting_player) && g_iPlayerArena[waiting_player] == 0)
+        {
+            // Check if player was added via wadd and play sound if needed
+            bool was_wadd_player = g_bPlayerAddedViaWadd[waiting_player];
+
+            // Add player to arena
+            AddInQueue(waiting_player, arena_index, true);
+
+            // Play sound if player was added via wadd
+            if (was_wadd_player && g_bPlayArenaSound)
+            {
+                PlayArenaSound(waiting_player);
+                g_bPlayerAddedViaWadd[waiting_player] = false;
+            }
+
+            MC_PrintToChat(waiting_player, "%t", "AutoJoinedArena", g_sArenaName[arena_index]);
+        }
+        else
+        {
+            // If the player is invalid or already in an arena, just remove from waiting list
+            g_bPlayerAddedViaWadd[waiting_player] = false;
+            continue;
+        }
+    }
+}
+
+// Play sound for player joining arena automatically
+void PlayArenaSound(int client)
+{
+    if (!IsValidClient(client))
+        return;
+
+    Handle setup = CreateKeyValues("data");
+    KvSetString(setup, "title", "Arena Join");
+    KvSetNum(setup, "type", MOTDPANEL_TYPE_URL);
+    KvSetString(setup, "msg", "https://progameszet.ru/Announcer_am_roundstart03.mp3");
+    ShowVGUIPanel(client, "info", setup, false);
+    CloseHandle(setup);
 }
 
 // Add player to arena queue with team preference and menu options
@@ -519,74 +827,29 @@ void AddInQueue(int client, int arena_index, bool showmsg = true, int playerPref
         // If all slots filled, continue to regular queue logic
     }
 
-    // Handle forced slot assignment (used by API natives)
-    int player_slot = SLOT_ONE;
-    if (forcedSlot > 0)
+    // Assign queue slot considering VIP priority and insert into queue
+    int player_slot = AssignQueueSlotAndInsert(client, arena_index, playerPrefTeam, forcedSlot);
+    if (player_slot == 0)
     {
-        // Validate forced slot for arena type
-        if (!IsValidSlotForArena(arena_index, forcedSlot))
+        // Slot assignment failed (invalid or occupied forced slot)
+        if (showmsg)
         {
-            if (showmsg)
+            if (forcedSlot > 0)
             {
-                if (g_bFourPersonArena[arena_index])
-                    MC_PrintToChat(client, "[MGE] Invalid slot %d for 2v2 arena (valid slots: 1-4)", forcedSlot);
+                if (!IsValidSlotForArena(arena_index, forcedSlot))
+                {
+                    if (g_bFourPersonArena[arena_index])
+                        MC_PrintToChat(client, "[MGE] Invalid slot %d for 2v2 arena (valid slots: 1-4)", forcedSlot);
+                    else
+                        MC_PrintToChat(client, "[MGE] Invalid slot %d for 1v1 arena (valid slots: 1-2)", forcedSlot);
+                }
                 else
-                    MC_PrintToChat(client, "[MGE] Invalid slot %d for 1v1 arena (valid slots: 1-2)", forcedSlot);
-            }
-            return;
-        }
-        
-        // Check if forced slot is already occupied
-        if (g_iArenaQueue[arena_index][forcedSlot] != 0)
-        {
-            if (showmsg)
-                MC_PrintToChat(client, "[MGE] Slot %d is already occupied", forcedSlot);
-            return;
-        }
-        
-        player_slot = forcedSlot;
-    }
-    // For 2v2 arenas, only respect team preference for active slots (team switching)
-    // Queued players just join the first available slot regardless of team
-    else if (g_bFourPersonArena[arena_index] && playerPrefTeam != 0)
-    {
-        // This is team switching for active players only
-        if (playerPrefTeam == TEAM_RED)
-        {
-            // Try main RED slots first
-            if (!g_iArenaQueue[arena_index][SLOT_ONE])
-                player_slot = SLOT_ONE;
-            else if (!g_iArenaQueue[arena_index][SLOT_THREE])
-                player_slot = SLOT_THREE;
-            else
-            {
-                // RED slots full, put in regular queue
-                player_slot = SLOT_FOUR + 1;
-                while (g_iArenaQueue[arena_index][player_slot])
-                    player_slot++;
+                {
+                    MC_PrintToChat(client, "[MGE] Slot %d is already occupied", forcedSlot);
+                }
             }
         }
-        else if (playerPrefTeam == TEAM_BLU)
-        {
-            // Try main BLU slots first  
-            if (!g_iArenaQueue[arena_index][SLOT_TWO])
-                player_slot = SLOT_TWO;
-            else if (!g_iArenaQueue[arena_index][SLOT_FOUR])
-                player_slot = SLOT_FOUR;
-            else
-            {
-                // BLU slots full, put in regular queue
-                player_slot = SLOT_FOUR + 1;
-                while (g_iArenaQueue[arena_index][player_slot])
-                    player_slot++;
-            }
-        }
-    }
-    else
-    {
-        // Regular queue assignment - find first available slot
-        while (g_iArenaQueue[arena_index][player_slot])
-            player_slot++;
+        return;
     }
 
     // Validate ELO authentication before allowing arena join
@@ -612,6 +875,9 @@ void AddInQueue(int client, int arena_index, bool showmsg = true, int playerPref
     g_iPlayerArena[client] = arena_index;
     g_iPlayerSlot[client] = player_slot;
     g_iArenaQueue[arena_index][player_slot] = client;
+
+    // Update keyhint immediately when queue changes
+    UpdateQueueKeyHintText(arena_index);
     
     // Call OnPlayerArenaAdded forward
     CallForward_OnPlayerArenaAdded(client, arena_index, player_slot);
@@ -630,6 +896,13 @@ void AddInQueue(int client, int arena_index, bool showmsg = true, int playerPref
             GetClientName(client, name, sizeof(name));
 
             SendArenaJoinMessage(name, g_iPlayerRating[client], g_sArenaName[arena_index], !g_bNoStats && !g_bNoDisplayRating && g_bShowElo[client], IsPlayerEligibleForElo(client));
+
+            // Play sound if player was added via wadd
+            if (g_bPlayerAddedViaWadd[client] && g_bPlayArenaSound)
+            {
+                PlayArenaSound(client);
+                g_bPlayerAddedViaWadd[client] = false;
+            }
 
             // Check if we have exactly 2 players per team for 2v2 match
             int red_count = 0;
@@ -670,6 +943,13 @@ void AddInQueue(int client, int arena_index, bool showmsg = true, int playerPref
 
             SendArenaJoinMessage(name, g_iPlayerRating[client], g_sArenaName[arena_index], !g_bNoStats && !g_bNoDisplayRating && g_bShowElo[client], IsPlayerEligibleForElo(client));
 
+            // Play sound if player was added via wadd
+            if (g_bPlayerAddedViaWadd[client] && g_bPlayArenaSound)
+            {
+                PlayArenaSound(client);
+                g_bPlayerAddedViaWadd[client] = false;
+            }
+
             if (g_iArenaQueue[arena_index][SLOT_ONE] && g_iArenaQueue[arena_index][SLOT_TWO])
             {
                 CreateTimer(1.5, Timer_StartDuel, arena_index);
@@ -686,6 +966,13 @@ void AddInQueue(int client, int arena_index, bool showmsg = true, int playerPref
     }
 
     UpdateHudForArena(arena_index);
+
+    // Check if we should add players from waiting list after successful join
+    // Only check if the joining player was added to main slots (not waiting queue)
+    if (player_slot <= SLOT_TWO || (g_bFourPersonArena[arena_index] && player_slot <= SLOT_FOUR))
+    {
+        CheckWaitingList(arena_index);
+    }
 
     return;
 }
@@ -784,6 +1071,8 @@ int StartCountDown(int arena_index)
                 Restore2v2WaitingSpectators(arena_index);
             }
             g_iArenaStatus[arena_index] = AS_IDLE;
+            // Reset duel start time since there are not enough players to continue
+            g_iArenaDuelStartTime[arena_index] = 0;
             return 0;
         }
     }
@@ -842,6 +1131,8 @@ int StartCountDown(int arena_index)
                 Restore2v2WaitingSpectators(arena_index);
             }
             g_iArenaStatus[arena_index] = AS_IDLE;
+            // Reset duel start time since there are not enough players to continue
+            g_iArenaDuelStartTime[arena_index] = 0;
             return 0;
         }
     }
@@ -964,7 +1255,7 @@ void ShowMainMenu(int client, bool listplayers = true)
         {
             Format(report, sizeof(report), "\x05%s:", g_sArenaName[i]);
 
-            if (!g_bNoDisplayRating && g_bShowElo[client])
+            if (!g_bNoDisplayRating)
             {
                 if (red_valid && blu_valid)
                     Format(report, sizeof(report), "%s \x04%N \x03(%d) \x05vs \x04%N (%d) \x05", report, red_f1, g_iPlayerRating[red_f1], blu_f1, g_iPlayerRating[blu_f1]);
@@ -1106,6 +1397,14 @@ Action Command_Menu(int client, int args)
     if (!IsValidClient(client))
         return Plugin_Continue;
 
+    // Check cooldown for add command (2 seconds)
+    float currentTime = GetGameTime();
+    if (currentTime - g_fPlayerAddCooldown[client] < 2.0)
+    {
+        return Plugin_Handled;
+    }
+    g_fPlayerAddCooldown[client] = currentTime;
+
     char sArg[32];
     if (GetCmdArg(1, sArg, sizeof(sArg)) > 0)
     {
@@ -1190,12 +1489,134 @@ Action Command_Menu(int client, int args)
     return Plugin_Handled;
 }
 
-// Remove player from current arena queue
+// Check if arena has any players in main slots
+/*
+bool IsArenaEmpty(int arena_index)
+{
+    if (g_bFourPersonArena[arena_index])
+    {
+        // For 2v2: check all 4 main slots
+        return !g_iArenaQueue[arena_index][SLOT_ONE] && 
+               !g_iArenaQueue[arena_index][SLOT_TWO] && 
+               !g_iArenaQueue[arena_index][SLOT_THREE] && 
+               !g_iArenaQueue[arena_index][SLOT_FOUR];
+    }
+    else
+    {
+        // For 1v1: check both main slots
+        return !g_iArenaQueue[arena_index][SLOT_ONE] && 
+               !g_iArenaQueue[arena_index][SLOT_TWO];
+    }
+}
+*/
+
+// Add player to waiting list for arena or directly to arena if players exist
+Action Command_Wadd(int client, int args)
+{
+    if (!IsValidClient(client))
+        return Plugin_Continue;
+
+    // If no arguments, show menu
+    if (args == 0)
+    {
+        ShowMainMenu(client);
+        return Plugin_Handled;
+    }
+
+    char sArg[32];
+    GetCmdArg(1, sArg, sizeof(sArg));
+
+    int arena_index = -1;
+
+    // Try to parse as arena number
+    int iArg = StringToInt(sArg);
+    if (iArg > 0 && iArg <= g_iArenaCount)
+    {
+        arena_index = iArg;
+    }
+    else
+    {
+        // Try to find by arena name
+        for(int i = 1; i <= g_iArenaCount; i++)
+        {
+            if(StrContains(g_sArenaName[i], sArg, false) >= 0)
+            {
+                if (g_iArenaStatus[i] == AS_IDLE) {
+                    arena_index = i;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (arena_index <= 0 || arena_index > g_iArenaCount)
+    {
+        MC_PrintToChat(client, "%t", "ArenaNotFound");
+        ShowMainMenu(client);
+        return Plugin_Handled;
+    }
+
+    // Check if player is already in waiting list for this arena
+    if (g_alArenaWaitingList[arena_index].FindValue(client) != -1)
+    {
+        MC_PrintToChat(client, "%t", "AlreadyInWaitingList", g_sArenaName[arena_index]);
+        return Plugin_Handled;
+    }
+
+    // Check if player is already in an arena
+    if (g_iPlayerArena[client])
+    {
+        MC_PrintToChat(client, "%t", "AlreadyInArena");
+        return Plugin_Handled;
+    }
+
+    // Count current players on arena
+    int player_count = 0;
+    if (g_iArenaQueue[arena_index][SLOT_ONE]) player_count++;
+    if (g_iArenaQueue[arena_index][SLOT_TWO]) player_count++;
+
+    if (g_bFourPersonArena[arena_index])
+    {
+        if (g_iArenaQueue[arena_index][SLOT_THREE]) player_count++;
+        if (g_iArenaQueue[arena_index][SLOT_FOUR]) player_count++;
+    }
+
+    // If arena is empty, add to waiting list
+    if (player_count == 0)
+    {
+        g_alArenaWaitingList[arena_index].Push(client);
+        g_bPlayerAddedViaWadd[client] = true;
+        MC_PrintToChat(client, "%t", "AddedToWaitingList");
+        ShowMainMenu(client);
+        return Plugin_Handled;
+    }
+
+    // If arena has players, add directly like normal add command
+    CloseClientMenu(client);
+    AddInQueue(client, arena_index, true);
+    return Plugin_Handled;
+}
+
+// Remove player from current arena queue or waiting list
 Action Command_Remove(int client, int args)
 {
     if (!IsValidClient(client))
         return Plugin_Continue;
 
+    // First check if player is in waiting list for any arena
+    for (int i = 1; i <= g_iArenaCount; i++)
+    {
+        int index = g_alArenaWaitingList[i].FindValue(client);
+        if (index != -1)
+        {
+            g_alArenaWaitingList[i].Erase(index);
+            g_bPlayerAddedViaWadd[client] = false;
+            MC_PrintToChat(client, "%t", "RemovedFromWaitingList");
+            return Plugin_Handled;
+        }
+    }
+
+    // If not in waiting list, remove from arena
     RemoveFromQueue(client, true);
     return Plugin_Handled;
 }
@@ -1454,7 +1875,12 @@ Action Timer_CountDown(Handle timer, any arena_index)
                 g_iArenaStatus[arena_index] = AS_COUNTDOWN;
             } else if (g_iArenaCd[arena_index] <= 0) {
                 g_iArenaStatus[arena_index] = AS_FIGHT;
-                g_iArenaDuelStartTime[arena_index] = GetTime(); // Capture duel start time
+                // Set duel start time only if not already set (first round of the duel)
+                bool isDuelStart = (g_iArenaDuelStartTime[arena_index] == 0);
+                if (isDuelStart)
+                    g_iArenaDuelStartTime[arena_index] = GetTime();
+                if (isDuelStart)
+                    ResetClassPointsForArena(arena_index);
                 char msg[64];
                 Format(msg, sizeof(msg), "FIGHT", g_iArenaCd[arena_index]);
                 PrintCenterText(red_f1, msg);
@@ -1465,6 +1891,10 @@ Action Timer_CountDown(Handle timer, any arena_index)
 
                 // Call 2v2 match start forward
                 CallForward_On2v2MatchStart(arena_index, red_f1, red_f2, blu_f1, blu_f2);
+                
+                // Call duel start forward only when duel actually starts (first round)
+                if (isDuelStart)
+                    CallForward_OnDuelStart(arena_index, red_f1, red_f2, blu_f1, blu_f2);
 
                 // For bball.
                 if (g_bArenaBBall[arena_index])
@@ -1529,7 +1959,12 @@ Action Timer_CountDown(Handle timer, any arena_index)
                 g_iArenaStatus[arena_index] = AS_COUNTDOWN;
             } else if (g_iArenaCd[arena_index] <= 0) {
                 g_iArenaStatus[arena_index] = AS_FIGHT;
-                g_iArenaDuelStartTime[arena_index] = GetTime(); // Capture duel start time
+                // Set duel start time only if not already set (first round of the duel)
+                bool isDuelStart = (g_iArenaDuelStartTime[arena_index] == 0);
+                if (isDuelStart)
+                    g_iArenaDuelStartTime[arena_index] = GetTime();
+                if (isDuelStart)
+                    ResetClassPointsForArena(arena_index);
                 char msg[64];
                 Format(msg, sizeof(msg), "FIGHT", g_iArenaCd[arena_index]);
                 PrintCenterText(red_f1, msg);
@@ -1538,6 +1973,10 @@ Action Timer_CountDown(Handle timer, any arena_index)
 
                 // Call match start forward
                 CallForward_On1v1MatchStart(arena_index, red_f1, blu_f1);
+                
+                // Call duel start forward only when duel actually starts (first round)
+                if (isDuelStart)
+                    CallForward_OnDuelStart(arena_index, red_f1, blu_f1, 0, 0);
 
                 // For bball.
                 if (g_bArenaBBall[arena_index])
@@ -1560,6 +1999,20 @@ Action Timer_CountDown(Handle timer, any arena_index)
 // Initialize duel start sequence and player setup
 Action Timer_StartDuel(Handle timer, any arena_index)
 {
+    // Clear any pending invites when match starts
+    for (int i = SLOT_ONE; i <= (g_bFourPersonArena[arena_index] ? SLOT_FOUR : SLOT_TWO); i++)
+    {
+        int player = g_iArenaQueue[arena_index][i];
+        if (player != 0 && IsValidClient(player))
+        {
+            ClearPlayerInvites(player);
+        }
+    }
+    
+    // Clear public invite for this arena when match starts
+    g_iPublicInviteArena[arena_index] = 0;
+    g_fPublicInviteTime[arena_index] = 0.0;
+
     ResetArena(arena_index);
 
     if (g_bArenaTurris[arena_index])
@@ -1590,7 +2043,7 @@ Action Timer_StartDuel(Handle timer, any arena_index)
 
     g_iArenaScore[arena_index][SLOT_ONE] = 0;
     g_iArenaScore[arena_index][SLOT_TWO] = 0;
-    g_iArenaDuelStartTime[arena_index] = 0; // Reset duel start time
+    // Don't reset duel start time here - it should persist across rounds until match completion
     UpdateHudForArena(arena_index);
     
     // Clear 2v2 ready hud text
@@ -1667,7 +2120,6 @@ Action Timer_AddBotInQueue(Handle timer, DataPack pack)
 
     return Plugin_Continue;
 }
-
 
 // ===== UTILITIES =====
 
@@ -1783,9 +2235,19 @@ void RemoveArenaProjectiles(int arena_index)
         
         if (StrContains(classname, "tf_projectile_", false) == 0)
         {
+            // Skip sentry rockets as they don't have m_hThrower property and use different owner system
+            if (StrEqual(classname, "tf_projectile_sentryrocket", false))
+                continue;
+                
             int owner = GetEntPropEnt(entity, Prop_Send, "m_hOwnerEntity");
             if (owner == -1)
-                owner = GetEntPropEnt(entity, Prop_Send, "m_hThrower");
+            {
+                // Only try m_hThrower if the property exists and entity is not sentryrocket
+                if (HasEntProp(entity, Prop_Send, "m_hThrower"))
+                {
+                    owner = GetEntPropEnt(entity, Prop_Send, "m_hThrower");
+                }
+            }
                 
             if (IsValidClient(owner) && g_iPlayerArena[owner] == arena_index)
             {
@@ -1794,7 +2256,9 @@ void RemoveArenaProjectiles(int arena_index)
         }
         else if (StrEqual(classname, "tf_ball_ornament", false))
         {
-            int owner = GetEntPropEnt(entity, Prop_Send, "m_hThrower");
+            int owner = -1;
+            if (HasEntProp(entity, Prop_Send, "m_hThrower"))
+                owner = GetEntPropEnt(entity, Prop_Send, "m_hThrower");
             if (IsValidClient(owner) && g_iPlayerArena[owner] == arena_index)
             {
                 entitiesToRemove.Push(entity);
@@ -1854,4 +2318,422 @@ void GetArenaBasicInfo(int arena_index, char[] arena_name, int name_size, int &f
     fraglimit = g_iArenaFraglimit[arena_index];
     is_2v2 = g_bFourPersonArena[arena_index];
     is_bball = g_bArenaBBall[arena_index];
+}
+
+
+// ===== INVITE SYSTEM =====
+
+// Check if player can send invites (must be in an arena)
+bool CanPlayerInvite(int client)
+{
+    int arena_index = g_iPlayerArena[client];
+    if (arena_index == 0)
+        return false;
+
+    return true;
+}
+
+// Clear all invites for a player
+void ClearPlayerInvites(int client)
+{
+    // Clear incoming invite
+    if (g_iPlayerInviteFrom[client] != 0)
+    {
+        g_iPlayerInviteFrom[g_iPlayerInviteFrom[client]] = 0;
+        g_iPlayerInviteFrom[client] = 0;
+    }
+    g_iPlayerInviteArena[client] = 0;
+
+    // Clear outgoing invite
+    if (g_iPlayerInviteTo[client] != 0)
+    {
+        g_iPlayerInviteArena[g_iPlayerInviteTo[client]] = 0;
+        g_iPlayerInviteTo[g_iPlayerInviteTo[client]] = 0;
+        g_iPlayerInviteTo[client] = 0;
+    }
+
+    g_fPlayerInviteTime[client] = 0.0;
+}
+
+// Send invite to specific player
+void SendInvite(int inviter, int target)
+{
+    // Clear any existing invites
+    ClearPlayerInvites(inviter);
+    ClearPlayerInvites(target);
+
+    // Set invite relationship
+    g_iPlayerInviteFrom[target] = inviter;
+    g_iPlayerInviteTo[inviter] = target;
+    g_fPlayerInviteTime[inviter] = GetGameTime();
+    g_iPlayerInviteArena[target] = g_iPlayerArena[inviter];
+
+    // Notify target
+    char inviter_name[MAX_NAME_LENGTH];
+    char arena_name[64];
+    int temp_fraglimit;
+    bool temp_is_2v2, temp_is_bball;
+    GetClientName(inviter, inviter_name, sizeof(inviter_name));
+    GetArenaBasicInfo(g_iPlayerArena[inviter], arena_name, sizeof(arena_name), temp_fraglimit, temp_is_2v2, temp_is_bball);
+
+    MC_PrintToChat(target, "%t", "InviteReceived", inviter_name, arena_name);
+
+    // Play ping sound for target (same as xf_forum_chat2 ping)
+    if (IsClientInGame(target) && !IsFakeClient(target))
+    {
+        EmitSoundToClient(target, "mentionalert.mp3", _, SNDLEVEL_NORMAL);
+    }
+
+    // If target is already in arena, mention they'll be moved
+    if (g_iPlayerArena[target] != 0)
+    {
+        MC_PrintToChat(target, "%t", "InviteWillMoveYou");
+    }
+
+    MC_PrintToChat(target, "%t", "InviteInstructions");
+
+    // Notify inviter
+    char target_name[MAX_NAME_LENGTH];
+    GetClientName(target, target_name, sizeof(target_name));
+    MC_PrintToChat(inviter, "%t", "InviteSent", target_name);
+}
+
+// Send public invite to all players
+void SendPublicInvite(int inviter)
+{
+    if (!CanPlayerInvite(inviter))
+        return;
+
+    int arena_index = g_iPlayerArena[inviter];
+    
+    // Set public invite for this arena
+    g_iPublicInviteArena[arena_index] = inviter;
+    g_fPublicInviteTime[arena_index] = GetGameTime();
+
+    char inviter_name[MAX_NAME_LENGTH];
+    char arena_name[64];
+    int temp_fraglimit;
+    bool temp_is_2v2, temp_is_bball;
+    GetClientName(inviter, inviter_name, sizeof(inviter_name));
+    GetArenaBasicInfo(arena_index, arena_name, sizeof(arena_name), temp_fraglimit, temp_is_2v2, temp_is_bball);
+
+    MC_PrintToChatAll("%t", "InviteAnyoneMessage", inviter_name, arena_name);
+}
+
+// Show player selection menu for invite
+void ShowInviteMenu(int client)
+{
+    Menu menu = new Menu(Menu_InviteSelect);
+    char title[128];
+    Format(title, sizeof(title), "%T", "InviteMenuTitle", client);
+    menu.SetTitle(title);
+
+    // Add "Invite Anyone" option as first item
+    char invite_anyone_text[64];
+    Format(invite_anyone_text, sizeof(invite_anyone_text), "%T", "InviteAnyone", client);
+    menu.AddItem("anyone", invite_anyone_text);
+
+    char player_name[MAX_NAME_LENGTH];
+    char player_id[8];
+    char menu_item[128];
+
+    for (int i = 1; i <= MaxClients; i++)
+    {
+        if (!IsValidClient(i) || i == client || !IsClientInGame(i))
+            continue;
+
+        GetClientName(i, player_name, sizeof(player_name));
+        IntToString(i, player_id, sizeof(player_id));
+
+        // Show status if player is in arena or spectating
+        if (g_iPlayerArena[i] != 0)
+        {
+            char arena_name[64];
+            int temp_fraglimit;
+            bool temp_is_2v2, temp_is_bball;
+            GetArenaBasicInfo(g_iPlayerArena[i], arena_name, sizeof(arena_name), temp_fraglimit, temp_is_2v2, temp_is_bball);
+            Format(menu_item, sizeof(menu_item), "%s (in %s)", player_name, arena_name);
+        }
+        else if (GetClientTeam(i) == TEAM_SPEC)
+        {
+            char spectatingLabel[32];
+            Format(spectatingLabel, sizeof(spectatingLabel), "%T", "SpectatingLabel", client);
+            Format(menu_item, sizeof(menu_item), "%s (%s)", player_name, spectatingLabel);
+        }
+        else
+        {
+            Format(menu_item, sizeof(menu_item), "%s", player_name);
+        }
+
+        menu.AddItem(player_id, menu_item);
+    }
+
+    if (menu.ItemCount == 0)
+    {
+        MC_PrintToChat(client, "%t", "NoPlayersAvailable");
+        delete menu;
+        return;
+    }
+
+    menu.ExitButton = true;
+    menu.Display(client, 30);
+}
+
+// Handle invite menu selection
+int Menu_InviteSelect(Menu menu, MenuAction action, int param1, int param2)
+{
+    switch (action)
+    {
+        case MenuAction_Select:
+        {
+            int client = param1;
+            char selected[16];
+            menu.GetItem(param2, selected, sizeof(selected));
+
+            // Check if "Invite Anyone" was selected
+            if (StrEqual(selected, "anyone"))
+            {
+                if (CanPlayerInvite(client))
+                {
+                    SendPublicInvite(client);
+                }
+                return 0;
+            }
+
+            int target = StringToInt(selected);
+            if (IsValidClient(target) && CanPlayerInvite(client))
+            {
+                SendInvite(client, target);
+            }
+            else
+            {
+                MC_PrintToChat(client, "%t", "NotInArena");
+            }
+        }
+        case MenuAction_End:
+        {
+            delete menu;
+        }
+    }
+    return 0;
+}
+
+// ===== INVITE COMMANDS =====
+
+// Main invite command
+Action Command_Invite(int client, int args)
+{
+    if (!IsValidClient(client))
+        return Plugin_Continue;
+
+    if (!CanPlayerInvite(client))
+    {
+        MC_PrintToChat(client, "%t", "NotInArena");
+        return Plugin_Handled;
+    }
+
+    char arg[64];
+    if (GetCmdArg(1, arg, sizeof(arg)) && strlen(arg) > 0)
+    {
+        // Try to find player by name
+        int target = FindTarget(client, arg, false, false);
+        if (target == -1)
+        {
+            MC_PrintToChat(client, "%t", "PlayerNotFound", arg);
+            return Plugin_Handled;
+        }
+
+        if (target == client)
+        {
+            MC_PrintToChat(client, "%t", "CannotInviteSelf");
+            return Plugin_Handled;
+        }
+
+        SendInvite(client, target);
+    }
+    else
+    {
+        // Show menu
+        ShowInviteMenu(client);
+    }
+
+    return Plugin_Handled;
+}
+
+// Accept invite command
+Action Command_AcceptInvite(int client, int args)
+{
+    if (!IsValidClient(client))
+        return Plugin_Continue;
+
+    int inviter = g_iPlayerInviteFrom[client];
+    int arena_index = 0;
+    bool isPublicInvite = false;
+
+    // Check for personal invite first
+    if (inviter != 0)
+    {
+        if (!IsValidClient(inviter) || g_iPlayerArena[inviter] == 0)
+        {
+            MC_PrintToChat(client, "%t", "InviteExpired");
+            ClearPlayerInvites(client);
+            return Plugin_Handled;
+        }
+
+        // Check timeout (30 seconds)
+        if (GetGameTime() - g_fPlayerInviteTime[inviter] > 30.0)
+        {
+            MC_PrintToChat(client, "%t", "InviteExpired");
+            ClearPlayerInvites(client);
+            return Plugin_Handled;
+        }
+
+        arena_index = g_iPlayerInviteArena[client];
+        if (arena_index <= 0 || arena_index > g_iArenaCount || g_iPlayerArena[inviter] != arena_index)
+        {
+            MC_PrintToChat(client, "%t", "InviteExpired");
+            ClearPlayerInvites(client);
+            return Plugin_Handled;
+        }
+    }
+    else
+    {
+        // Check for public invite
+        for (int i = 1; i <= g_iArenaCount; i++)
+        {
+            if (g_iPublicInviteArena[i] != 0)
+            {
+                // Check timeout (30 seconds)
+                if (GetGameTime() - g_fPublicInviteTime[i] <= 30.0)
+                {
+                    arena_index = i;
+                    inviter = g_iPublicInviteArena[i];
+                    isPublicInvite = true;
+                    break;
+                }
+                else
+                {
+                    // Clear expired public invite
+                    g_iPublicInviteArena[i] = 0;
+                    g_fPublicInviteTime[i] = 0.0;
+                }
+            }
+        }
+
+        if (arena_index == 0)
+        {
+            MC_PrintToChat(client, "%t", "NoInviteToAccept");
+            return Plugin_Handled;
+        }
+    }
+
+    // Imitate "add <arena>" logic
+    AddInQueue(client, arena_index, true);
+
+    // Clear invites
+    ClearPlayerInvites(client);
+    
+    // Clear public invite if this was a public invite
+    if (isPublicInvite)
+    {
+        g_iPublicInviteArena[arena_index] = 0;
+        g_fPublicInviteTime[arena_index] = 0.0;
+    }
+
+    // Notify inviter (if it was a personal invite)
+    if (!isPublicInvite && IsValidClient(inviter))
+    {
+        char client_name[MAX_NAME_LENGTH];
+        GetClientName(client, client_name, sizeof(client_name));
+        MC_PrintToChat(inviter, "%t", "InviteAccepted", client_name);
+    }
+
+    return Plugin_Handled;
+}
+
+// Decline invite command
+Action Command_DeclineInvite(int client, int args)
+{
+    if (!IsValidClient(client))
+        return Plugin_Continue;
+
+    int inviter = g_iPlayerInviteFrom[client];
+    if (inviter == 0)
+    {
+        MC_PrintToChat(client, "%t", "NoInviteToDecline");
+        return Plugin_Handled;
+    }
+
+    // Clear invites
+    ClearPlayerInvites(client);
+
+    // Notify inviter if still valid
+    if (IsValidClient(inviter))
+    {
+        char client_name[MAX_NAME_LENGTH];
+        GetClientName(client, client_name, sizeof(client_name));
+        MC_PrintToChat(inviter, "%t", "InviteDeclined", client_name);
+    }
+
+    MC_PrintToChat(client, "%t", "InviteDeclinedSelf");
+
+    return Plugin_Handled;
+}
+
+// Block spectate command and execute remove instead
+Action Command_BlockSpectate(int client, const char[] command, int args)
+{
+    if (!IsValidClient(client))
+        return Plugin_Continue;
+
+    int arena_index = g_iPlayerArena[client];
+    if (arena_index > 0)
+    {
+        // Execute remove command instead of spectate
+        MC_PrintToChat(client, "%t", "SpecRemove");
+        RemoveFromQueue(client, true);
+        return Plugin_Handled; // Block the original spectate command
+    }
+
+    return Plugin_Continue; // Allow spectate if not in arena
+}
+
+// Toggle queue display in keyhint
+Action Command_ToggleQueue(int client, int args)
+{
+    if (!IsValidClient(client))
+        return Plugin_Continue;
+
+    // Toggle the setting
+    g_bShowQueue[client] = !g_bShowQueue[client];
+
+    // Save to cookie
+    char cookieValue[8];
+    IntToString(g_bShowQueue[client] ? 1 : 0, cookieValue, sizeof(cookieValue));
+    g_hShowQueueCookie.Set(client, cookieValue);
+
+    // Notify player
+    if (g_bShowQueue[client])
+    {
+        MC_PrintToChat(client, "%t", "QueueKeyhintEnabled");
+    }
+    else
+    {
+        MC_PrintToChat(client, "%t", "QueueKeyhintDisabled");
+    }
+
+    // Update keyhint immediately if player is in arena
+    if (g_iPlayerArena[client] > 0)
+    {
+        if (g_bShowQueue[client])
+        {
+            UpdateQueueKeyHintText(g_iPlayerArena[client]);
+        }
+        else
+        {
+            ClearQueueKeyHintText(client);
+        }
+    }
+
+    return Plugin_Handled;
 }

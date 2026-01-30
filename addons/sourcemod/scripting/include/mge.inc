@@ -106,6 +106,18 @@ forward void MGE_OnPlayerArenaRemoved(int client, int arena_index);
 forward void MGE_On1v1MatchStart(int arena_index, int player1, int player2);
 
 /**
+ * Called when a duel actually starts (first round, when duel timer is set)
+ * This is called only once per duel, not on every round
+ *
+ * @param arena_index    Arena index
+ * @param player1        First player client index (1v1) or Team 1 first player (2v2)
+ * @param player2        Second player client index (1v1) or Team 1 second player (2v2)
+ * @param player3        Team 2 first player (2v2 only, 0 for 1v1)
+ * @param player4        Team 2 second player (2v2 only, 0 for 1v1)
+ */
+forward void MGE_OnDuelStart(int arena_index, int player1, int player2, int player3, int player4);
+
+/**
  * Called when a 1v1 match ends
  *
  * @param arena_index    Arena index
@@ -114,7 +126,7 @@ forward void MGE_On1v1MatchStart(int arena_index, int player1, int player2);
  * @param winner_score   Winner's final score (frags)
  * @param loser_score    Loser's final score (frags)
  */
-forward void MGE_On1v1MatchEnd(int arena_index, int winner, int loser, int winner_score, int loser_score);
+forward void MGE_On1v1MatchEnd(int duel_id, int arena_index, int winner, int loser, int winner_score, int loser_score);
 
 /**
  * Called when a 2v2 match starts
@@ -139,7 +151,7 @@ forward void MGE_On2v2MatchStart(int arena_index, int team1_player1, int team1_p
  * @param team2_player1      Team 2 first player
  * @param team2_player2      Team 2 second player
  */
-forward void MGE_On2v2MatchEnd(int arena_index, int winning_team, int winning_score, int losing_score, int team1_player1, int team1_player2, int team2_player1, int team2_player2);
+forward void MGE_On2v2MatchEnd(int duel_id, int arena_index, int winning_team, int winning_score, int losing_score, int team1_player1, int team1_player2, int team2_player1, int team2_player2);
 
 /**
  * Called when a player dies in an arena
@@ -175,6 +187,82 @@ forward void MGE_On2v2ReadyStart(int arena_index);
  * @param ready_status   New ready status (true/false)
  */
 forward void MGE_On2v2PlayerReady(int client, int arena_index, bool ready_status);
+
+/**
+ * Called when a player is about to score a point (kill) in an arena
+ * This can be blocked to prevent score awarding
+ *
+ * @param killer         Killer client index
+ * @param victim         Victim client index
+ * @param arena_index    Arena index
+ * @return               Plugin_Continue to allow scoring, Plugin_Stop to block
+ */
+forward Action MGE_OnPlayerScorePoint(int killer, int victim, int arena_index);
+
+/**
+ * Called when a player successfully scores a point (kill) in an arena
+ *
+ * @param killer         Killer client index
+ * @param victim         Victim client index
+ * @param arena_index    Arena index
+ * @param new_score      Killer's new score after this point
+ */
+forward void MGE_OnPlayerScoredPoint(int killer, int victim, int arena_index, int new_score);
+
+/**
+ * Called before ELO calculations at the end of a match
+ * This can be blocked to prevent ELO changes
+ *
+ * @param arena_index    Arena index
+ * @param winner         Winner client index
+ * @param loser          Loser client index
+ * @param winner_score   Winner's final score
+ * @param loser_score    Loser's final score
+ * @return               Plugin_Continue to allow ELO calc, Plugin_Stop to block
+ */
+forward Action MGE_OnMatchELOCalculation(int arena_index, int winner, int loser, int winner_score, int loser_score);
+
+/**
+ * Called before 2v2 ELO calculations at the end of a match
+ * This can be blocked to prevent ELO changes
+ *
+ * @param arena_index        Arena index
+ * @param team1_player1      Team 1 first player
+ * @param team1_player2      Team 1 second player
+ * @param team2_player1      Team 2 first player
+ * @param team2_player2      Team 2 second player
+ * @param winning_score      Winning team's score
+ * @param losing_score       Losing team's score
+ * @return                   Plugin_Continue to allow ELO calc, Plugin_Stop to block
+ */
+forward Action MGE_OnMatch2v2ELOCalculation(int arena_index, int team1_player1, int team1_player2, int team2_player1, int team2_player2, int winning_score, int losing_score);
+
+/**
+ * Gets a player's class rating for a specific class
+ *
+ * @param client         Client index
+ * @param classType      TFClassType value (1-9)
+ * @return               Class rating, or 0 on invalid client/class
+ */
+native int MGE_GetPlayerClassRating(int client, int classType);
+
+/**
+ * Gets a player's class rating for their current class
+ *
+ * @param client         Client index
+ * @return               Class rating, or 0 on invalid client/class
+ */
+native int MGE_GetPlayerCurrentClassRating(int client);
+
+/**
+ * Gets a player's matchup rating for a specific class vs opponent class
+ *
+ * @param client         Client index
+ * @param myClass        TFClassType value (1-9) - the class the player is playing
+ * @param opponentClass  TFClassType value (1-9) - the opponent's class
+ * @return               Matchup rating, or 1500 (default) if not initialized
+ */
+native int MGE_GetPlayerMatchupRating(int client, int myClass, int opponentClass);
 
 /**
  * Gets a player's current arena
@@ -236,6 +324,14 @@ native int MGE_GetArenaPlayer(int arena_index, int slot);
 native bool MGE_IsValidArena(int arena_index);
 
 /**
+ * Gets the status of an arena
+ *
+ * @param arena_index    Arena index
+ * @return               Arena status (AS_IDLE, AS_FIGHT, etc.)
+ */
+native int MGE_GetArenaStatus(int arena_index);
+
+/**
  * Adds a player to an arena
  *
  * @param client         Client to add
@@ -281,6 +377,23 @@ native bool MGE_SetPlayerReady(int client, bool ready);
 native int MGE_GetPlayerTeammate(int client);
 
 /**
+ * Gets the score for a specific slot in an arena
+ *
+ * @param arena_index    Arena index
+ * @param slot           Slot number (SLOT_ONE, SLOT_TWO, etc.)
+ * @return               Score for the slot (0 if invalid)
+ */
+native int MGE_GetArenaScore(int arena_index, int slot);
+
+/**
+ * Gets a player's slot in their current arena
+ *
+ * @param client         Client index
+ * @return               Slot number (SLOT_ONE, SLOT_TWO, etc., 0 if not in arena)
+ */
+native int MGE_GetPlayerSlot(int client);
+
+/**
  * Checks if an arena supports a specific game mode
  *
  * @param arena_index    Arena index
@@ -320,6 +433,7 @@ public void __pl_mge_SetNTVOptional()
     MarkNativeAsOptional("MGE_GetArenaCount");
     MarkNativeAsOptional("MGE_GetArenaPlayer");
     MarkNativeAsOptional("MGE_IsValidArena");
+    MarkNativeAsOptional("MGE_GetArenaStatus");
     MarkNativeAsOptional("MGE_AddPlayerToArena");
     MarkNativeAsOptional("MGE_RemovePlayerFromArena");
     MarkNativeAsOptional("MGE_IsPlayerReady");
@@ -327,5 +441,6 @@ public void __pl_mge_SetNTVOptional()
     MarkNativeAsOptional("MGE_GetPlayerTeammate");
     MarkNativeAsOptional("MGE_ArenaHasGameMode");
     MarkNativeAsOptional("MGE_IsValidSlotForArena");
+    MarkNativeAsOptional("MGE_GetPlayerMatchupRating");
 }
 #endif

@@ -339,8 +339,33 @@ void ShowPlayerRankPanel(int client, int targetPlayer)
     if (!g_bNoDisplayRating && g_bShowElo[client])
     {
         char ratingLine[256];
-        Format(ratingLine, sizeof(ratingLine), "Rating: %d (#%d)", g_iPlayerRating[targetPlayer], g_iPlayerRatingRank[targetPlayer]);
+        Format(ratingLine, sizeof(ratingLine), "%T", "PanelRatingLine", client, g_iPlayerRating[targetPlayer], g_iPlayerRatingRank[targetPlayer]);
         panel.DrawText(ratingLine);
+
+        int classId = view_as<int>(g_tfctPlayerClass[targetPlayer]);
+        if (classId < 1 || classId > 9)
+            classId = view_as<int>(TF2_GetPlayerClass(targetPlayer));
+
+        if (classId >= 1 && classId <= 9)
+        {
+            char className[16];
+            strcopy(className, sizeof(className), TFClassToString(view_as<TFClassType>(classId)));
+            char classRatingLine[256];
+            // Show average matchup rating for this class (average across all opponent classes)
+            int totalRating = 0;
+            int count = 0;
+            for (int oppClass = 1; oppClass <= 9; oppClass++)
+            {
+                if (g_iPlayerClassRating[targetPlayer][classId][oppClass] > 0)
+                {
+                    totalRating += g_iPlayerClassRating[targetPlayer][classId][oppClass];
+                    count++;
+                }
+            }
+            int avgRating = (count > 0) ? (totalRating / count) : 0;
+            Format(classRatingLine, sizeof(classRatingLine), "%T", "PanelClassRatingLine", client, className, avgRating);
+            panel.DrawText(classRatingLine);
+        }
     }
     
     // Wins display

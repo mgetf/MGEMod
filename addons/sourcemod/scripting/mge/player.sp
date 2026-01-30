@@ -11,6 +11,7 @@ void HandleClientConnection(int client)
     g_bShowHud[client] = true;
     g_bPlayerRestoringAmmo[client] = false;
     g_bPlayerEloVerified[client] = false;
+    g_bPlayerAddedViaWadd[client] = false;
     
     // Clear any inherited statistics data immediately (but preserve if already properly loaded)
     // This prevents stats from being inherited from previous client in the same slot
@@ -20,6 +21,15 @@ void HandleClientConnection(int client)
         g_iPlayerWins[client] = 0;
         g_iPlayerLosses[client] = 0;
         g_bPlayerEloVerified[client] = false;
+        for (int classId = 1; classId <= 9; classId++)
+        {
+            g_iPlayerClassPoints[client][classId] = 0;
+            for (int oppClassId = 1; oppClassId <= 9; oppClassId++)
+            {
+                g_iPlayerClassRating[client][classId][oppClassId] = 0;
+                g_iPlayerMatchupCount[client][classId][oppClassId] = 0;
+            }
+        }
     }
     
     // Initialize class tracking ArrayList
@@ -32,6 +42,9 @@ void HandleClientConnection(int client)
     
     CreateTimer(5.0, Timer_ShowAdv, GetClientUserId(client));
     CreateTimer(15.0, Timer_WelcomePlayer, GetClientUserId(client));
+    
+    // Initialize spectator target detection for HUD display
+    CreateTimer(0.5, Timer_ChangeSpecTarget, GetClientUserId(client));
     
     SDKHook(client, SDKHook_OnTakeDamage, OnTakeDamage);
 }
@@ -51,6 +64,14 @@ void HandleClientAuthentication(int client)
                 pack.WriteCell(GetClientUserId(client));
                 pack.WriteCell(arena_index);
                 g_iPlayerRating[client] = 1551;
+                for (int classId = 1; classId <= 9; classId++)
+                {
+                    g_iPlayerClassPoints[client][classId] = 0;
+                    for (int oppClassId = 1; oppClassId <= 9; oppClassId++)
+                    {
+                        g_iPlayerClassRating[client][classId][oppClassId] = 1551;
+                    }
+                }
                 g_bPlayerAskedForBot[i] = false;
                 break;
             }
@@ -66,6 +87,25 @@ void HandleClientAuthentication(int client)
 // Handle client disconnection and cleanup
 void HandleClientDisconnection(int client)
 {
+    // Clear any invites before removing from queue
+    ClearPlayerInvites(client);
+    
+    // Reset wadd flag
+    g_bPlayerAddedViaWadd[client] = false;
+    
+    // Remove from waiting lists
+    for (int i = 1; i <= g_iArenaCount; i++)
+    {
+        if (g_alArenaWaitingList[i] != null)
+        {
+            int index = g_alArenaWaitingList[i].FindValue(client);
+            if (index != -1)
+            {
+                g_alArenaWaitingList[i].Erase(index);
+            }
+        }
+    }
+
     // We ignore the kick queue check for this function only so that clients that get kicked still get their elo calculated
     if (IsValidClient(client, true) && g_iPlayerArena[client])
     {
@@ -107,6 +147,15 @@ void HandleClientDisconnection(int client)
         g_iPlayerRating[client] = 0;
         g_iPlayerWins[client] = 0;
         g_iPlayerLosses[client] = 0;
+        for (int classId = 1; classId <= 9; classId++)
+        {
+            g_iPlayerClassPoints[client][classId] = 0;
+            for (int oppClassId = 1; oppClassId <= 9; oppClassId++)
+            {
+                g_iPlayerClassRating[client][classId][oppClassId] = 0;
+                g_iPlayerMatchupCount[client][classId][oppClassId] = 0;
+            }
+        }
         
         // Clear hud text if arena was in ready state
         if (g_iArenaStatus[arena_index] == AS_WAITING_READY)
@@ -144,6 +193,8 @@ void HandleClientDisconnection(int client)
         }
 
         g_iArenaStatus[arena_index] = AS_IDLE;
+        // Reset duel start time since player disconnected and arena became idle
+        g_iArenaDuelStartTime[arena_index] = 0;
         return;
     }
 }
@@ -611,6 +662,44 @@ Action ExecuteArenaClassChange(int client, TFClassType new_class, int arena_inde
     return Plugin_Continue;
 }
 
+// Records a scoring point for the player's current class during a duel and tracks matchup
+void AddClassPointForPlayer(int client, int victim)
+{
+    if (!IsValidClient(client) || !IsValidClient(victim))
+        return;
+
+    TFClassType classType = g_tfctPlayerClass[client];
+    int classId = view_as<int>(classType);
+    if (classId < 1 || classId > 9)
+    {
+        classType = TF2_GetPlayerClass(client);
+        classId = view_as<int>(classType);
+    }
+
+    TFClassType victimClassType = g_tfctPlayerClass[victim];
+    int victimClassId = view_as<int>(victimClassType);
+    if (victimClassId < 1 || victimClassId > 9)
+    {
+        victimClassType = TF2_GetPlayerClass(victim);
+        victimClassId = view_as<int>(victimClassType);
+    }
+
+    if (classId >= 1 && classId <= 9)
+    {
+        g_iPlayerClassPoints[client][classId] += 1;
+        // Track matchup interaction
+        if (victimClassId >= 1 && victimClassId <= 9)
+        {
+            g_iPlayerMatchupCount[client][classId][victimClassId] += 1;
+            // Initialize matchup rating if it doesn't exist
+            if (g_iPlayerClassRating[client][classId][victimClassId] == 0)
+            {
+                g_iPlayerClassRating[client][classId][victimClassId] = 1500;
+            }
+        }
+    }
+}
+
 // Handles class changes for players currently alive and fighting
 void HandleActivePlayerClassChange(int client, int arena_index)
 {
@@ -640,6 +729,7 @@ void HandleActivePlayerClassChange(int client, int arena_index)
         if (g_bArenaClassChange[arena_index])
         {
             g_iArenaScore[arena_index][killer_team_slot] += 1;
+            AddClassPointForPlayer(killer, client);
             MC_PrintToChat(killer, "%t", "ClassChangePointOpponent");
             MC_PrintToChat(client, "%t", "ClassChangePoint");
         }
@@ -1022,6 +1112,7 @@ Action Event_PlayerHurt(Event event, const char[] name, bool dontBroadcast)
 Action Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast)
 {
     int victim = GetClientOfUserId(event.GetInt("userid"));
+
     int arena_index = g_iPlayerArena[victim];
     int victim_slot = g_iPlayerSlot[victim];
 
@@ -1095,6 +1186,8 @@ Action Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast)
 
     int attacker = GetClientOfUserId(event.GetInt("attacker"));
 
+    // AFK check removed - now handled by AFK plugin via forwards
+
     if (g_iArenaStatus[arena_index] < AS_FIGHT && IsValidClient(attacker) && IsPlayerAlive(attacker))
     {
         TF2_RegeneratePlayer(attacker);
@@ -1122,7 +1215,17 @@ Action Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast)
     }
 
     if (!g_bArenaBBall[arena_index] && !g_bArenaKoth[arena_index] && (!g_bFourPersonArena[arena_index] || (g_bFourPersonArena[arena_index] && !IsPlayerAlive(victim_teammate)))) // Kills shouldn't give points in bball. Or if only 1 player in a two person arena dies
-        g_iArenaScore[arena_index][killer_team_slot] += 1;
+    {
+        // Call forward to allow blocking score awarding
+        Action result = CallForward_OnPlayerScorePoint(killer, victim, arena_index);
+        if (result == Plugin_Continue)
+        {
+            g_iArenaScore[arena_index][killer_team_slot] += 1;
+            AddClassPointForPlayer(killer, victim);
+            // Call forward after successful scoring
+            CallForward_OnPlayerScoredPoint(killer, victim, arena_index, g_iArenaScore[arena_index][killer_team_slot]);
+        }
+    }
 
     if (!g_bArenaEndif[arena_index]) // Endif does not need to display health, since it is one-shot kills.
     {
@@ -1561,4 +1664,40 @@ void GetPlayerClassString(int client, int arena_index, char[] buffer, int maxlen
         // Use single class from duel start
         strcopy(buffer, maxlen, TFClassToString(g_tfctPlayerDuelClass[client]));
     }
+}
+
+// Finds the online player with the highest rating
+int FindTopRatedOnlinePlayer()
+{
+    int topPlayer = -1;
+    int topRating = -1;
+    
+    for (int i = 1; i <= MaxClients; i++)
+    {
+        if (IsValidClient(i) && !IsFakeClient(i) && g_iPlayerRating[i] > 0)
+        {
+            if (g_iPlayerRating[i] > topRating)
+            {
+                topRating = g_iPlayerRating[i];
+                topPlayer = i;
+            }
+        }
+    }
+    
+    return topPlayer;
+}
+
+// Timer callback to display top rated online player
+Action Timer_ShowTopRatedPlayer(Handle timer)
+{
+    int topPlayer = FindTopRatedOnlinePlayer();
+    
+    if (topPlayer != -1 && IsValidClient(topPlayer))
+    {
+        char playerName[MAX_NAME_LENGTH];
+        GetClientName(topPlayer, playerName, sizeof(playerName));
+        MC_PrintToChatAll("%t", "TopRatedOnlinePlayer", playerName, g_iPlayerRating[topPlayer]);
+    }
+    
+    return Plugin_Continue;
 }
