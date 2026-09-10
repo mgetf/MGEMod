@@ -574,7 +574,7 @@ void RemoveFromQueue(int client, bool calcstats = false, bool specfix = true)
                 int stayerScore = g_iArenaScore[arena_index][foe_team_slot];
                 int leaverScore = g_iArenaScore[arena_index][player_team_slot];
 
-                if (ShouldForfeitOnLeave(stayerScore, leaverScore))
+                if (ShouldForfeitOnLeave(arena_index, stayerScore, leaverScore))
                 {
                     ProcessMatchForfeit(arena_index, foe, foe2, client, player_teammate, foe_team_slot, player_team_slot, client, player_slot);
                 }
@@ -641,7 +641,7 @@ void RemoveFromQueue(int client, bool calcstats = false, bool specfix = true)
                 int stayerScore = g_iArenaScore[arena_index][foe_slot];
                 int leaverScore = g_iArenaScore[arena_index][player_slot];
 
-                if (ShouldForfeitOnLeave(stayerScore, leaverScore))
+                if (ShouldForfeitOnLeave(arena_index, stayerScore, leaverScore))
                 {
                     ProcessMatchForfeit(arena_index, foe, 0, client, 0, foe_slot, player_slot, client, player_slot);
                 }

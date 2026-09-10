@@ -80,9 +80,16 @@ void ProcessMatchCompletion(int arena_index, int winner1, int winner2, int loser
     HandlePostMatchQueueRotation(arena_index, loser1, loser2);
 }
 
-bool ShouldForfeitOnLeave(int stayerScore, int leaverScore)
+// Early-leave forfeit. `early_leave_threshold` 0 disables it. The stayer must be strictly
+// above that many points, and the leaver must not be ahead. At or below the threshold there
+// is no rating change, no mgemod_duels row, and no match-end forward (classelo included).
+bool ShouldForfeitOnLeave(int arena_index, int stayerScore, int leaverScore)
 {
-    if (stayerScore == 0 && leaverScore == 0)
+    int threshold = g_iArenaEarlyLeave[arena_index];
+    if (threshold <= 0)
+        return false;
+
+    if (stayerScore <= threshold)
         return false;
 
     return leaverScore <= stayerScore;

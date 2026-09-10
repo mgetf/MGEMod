@@ -182,7 +182,7 @@ SpawnConfigs
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `early_leave_threshold` | int | `0` | If a player leaves mid-match and their opponent has at least this many points, the opponent is awarded the win and ELO is calculated. `0` disables early-leave wins. |
+| `early_leave_threshold` | int | `0` | If a player leaves mid-match and their opponent has more than this many points, the opponent is awarded the win: rating updates and a `mgemod_duels` row is written. At or below the threshold (e.g. 5-5 with threshold 5) there is no rating change, no duel log, and no match-end forward. `0` disables early-leave wins. |
 | `allow_class_change` | 0/1 | `1` | Whether players can change class during a duel. When set to `0`, class switching is locked after the first point is scored. |
 | `airshot_min_height` | int | `250` | Minimum height above ground (in Hammer units) for a kill to be counted as an airshot in stats. |
 | `knockback_boost` | 0/1 | `0` | Enable engine knockback boost vectors. Experimental. |

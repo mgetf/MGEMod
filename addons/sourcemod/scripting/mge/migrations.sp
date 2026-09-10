@@ -142,6 +142,8 @@ bool IsAlreadyAppliedMigrationError(const char[] error)
 
     if (StrContains(error, "already exists", false) != -1)
         return true;
+
+    return false;
 }
 
 // Records successful migration completion in the migrations tracking table
