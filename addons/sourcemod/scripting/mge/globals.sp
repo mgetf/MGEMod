@@ -158,7 +158,11 @@ float
     g_fArenaRespawnTime     [MAXARENAS + 1],
     g_fKothCappedPercent    [MAXARENAS + 1],
     g_fTotalTime            [MAXARENAS + 1],
-    g_fCappedTime           [MAXARENAS + 1];
+    g_fCappedTime           [MAXARENAS + 1],
+    g_fKothCapSeconds       [MAXARENAS + 1][4],
+    g_fKothUnlockAt         [MAXARENAS + 1],
+    g_fKothWaveNeutral      [MAXARENAS + 1][4],
+    g_fKothWaveWhenOwner    [MAXARENAS + 1][4][4];
 
 bool
     g_bArenaAmmomod         [MAXARENAS + 1],
@@ -179,6 +183,11 @@ bool
     g_bArenaTurris          [MAXARENAS + 1],
     g_bOvertimePlayed       [MAXARENAS + 1][4],
     g_bTimerRunning         [MAXARENAS + 1],
+    g_bKothRulesFromMap     [MAXARENAS + 1],
+    g_bKothWaveFromMap      [MAXARENAS + 1],
+    g_bKothUnlockArmed      [MAXARENAS + 1],
+    g_bKothRoundPause       [MAXARENAS + 1],
+    g_bKothCanCap           [MAXARENAS + 1][4],
     g_bArenaBoostVectors    [MAXARENAS + 1],
     g_bArenaClassChange     [MAXARENAS + 1];
 
@@ -188,6 +197,13 @@ int
     g_iCappingTeam          [MAXARENAS + 1],
     g_iCapturePoint         [MAXARENAS + 1],
     g_iDefaultCapTime       [MAXARENAS + 1],
+    g_iKothNumCap           [MAXARENAS + 1][4],
+    g_iKothStartCap         [MAXARENAS + 1][4],
+    g_iKothUnlockSeconds    [MAXARENAS + 1],
+    g_iKothMeterDir         [MAXARENAS + 1],
+    g_iKothCapSound         [MAXARENAS + 1],
+    g_iKothMoveLoop         [MAXARENAS + 1],
+    g_iKothBlockLoop        [MAXARENAS + 1],
     g_iArenaDuelStartTime   [MAXARENAS + 1],  // Unix timestamp when duel started
     //                      [what arena is the cap point in][Team Red or Team Blu Time left]
     g_iKothTimer            [MAXARENAS + 1][4],

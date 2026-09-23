@@ -209,10 +209,13 @@ int Native_SetPlayerReady(Handle plugin, int numParams)
         return false;
     
     g_bPlayer2v2Ready[client] = ready;
-    
-    // Call the forward
-    CallForward_On2v2PlayerReady(client, g_iPlayerArena[client], ready);
-    
+
+    int arena_index = g_iPlayerArena[client];
+    CallForward_On2v2PlayerReady(client, arena_index, ready);
+
+    if (g_iArenaStatus[arena_index] == AS_WAITING_READY)
+        Update2v2ReadyStatus(arena_index);
+
     return true;
 }
 

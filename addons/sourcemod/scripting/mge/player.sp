@@ -1195,11 +1195,27 @@ Action Event_PlayerHurt(Event event, const char[] name, bool dontBroadcast)
 }
 
 // Manages player death events including scoring, ELO calculation, and respawn logic
+float KothRespawnDelay(int arena, int client)
+{
+    if (!g_bKothWaveFromMap[arena])
+        return g_fArenaRespawnTime[arena];
+
+    int slot = g_iPlayerSlot[client];
+    int team = (slot == SLOT_ONE || slot == SLOT_THREE) ? TEAM_RED : TEAM_BLU;
+    int owner = g_iPointState[arena];
+    if (owner != TEAM_RED && owner != TEAM_BLU)
+        return g_fKothWaveNeutral[arena][team];
+    return g_fKothWaveWhenOwner[arena][owner][team];
+}
+
 Action Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast)
 {
     int victim = GetClientOfUserId(event.GetInt("userid"));
     int arena_index = g_iPlayerArena[victim];
     int victim_slot = g_iPlayerSlot[victim];
+
+    if (arena_index > 0 && victim_slot >= SLOT_ONE && victim_slot <= SLOT_FOUR)
+        g_bPlayerTouchPoint[arena_index][victim_slot] = false;
 
     // Reset victim's velocity to prevent momentum carryover to respawn
     if (IsValidClient(victim) && arena_index > 0)
@@ -1364,8 +1380,8 @@ Action Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast)
             {
                 ResetKiller(killer, arena_index);
             }
-            // Handle 2v2 team reset when one team is eliminated
-            Handle2v2TeamResetOnDeath(arena_index, victim, victim_teammate, killer_teammate, killer_team_slot);
+            if (!g_bArenaUltiduo[arena_index])
+                Handle2v2TeamResetOnDeath(arena_index, victim, victim_teammate, killer_teammate, killer_team_slot);
 
 
         }
@@ -1374,7 +1390,8 @@ Action Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast)
         // TODO: Check to see if its koth and apply a spawn penalty if needed depending on who's capping
         if (g_bArenaBBall[arena_index] || g_bArenaKoth[arena_index])
         {
-            CreateTimer(g_fArenaRespawnTime[arena_index], Timer_ResetPlayer, GetClientUserId(victim));
+            float delay = g_bArenaKoth[arena_index] ? KothRespawnDelay(arena_index, victim) : g_fArenaRespawnTime[arena_index];
+            CreateTimer(delay, Timer_ResetPlayer, GetClientUserId(victim));
         }
         else if (g_bFourPersonArena[arena_index] && victim_teammate && IsPlayerAlive(victim_teammate))
         {

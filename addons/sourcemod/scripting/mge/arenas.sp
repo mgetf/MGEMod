@@ -1101,43 +1101,17 @@ int StartCountDown(int arena_index)
 // Play appropriate victory/defeat sounds to all players in an arena
 void PlayEndgameSoundsToArena(any arena_index, any winner_team)
 {
-    int red_1 = g_iArenaQueue[arena_index][SLOT_ONE];
-    int blu_1 = g_iArenaQueue[arena_index][SLOT_TWO];
-    char SoundFileBlu[124];
-    char SoundFileRed[124];
-
-    // If the red team won
-    if (winner_team == 1)
+    bool redWon = winner_team == 1;
+    int maxSlots = g_bFourPersonArena[arena_index] ? SLOT_FOUR : SLOT_TWO;
+    for (int slot = SLOT_ONE; slot <= maxSlots; slot++)
     {
-        SoundFileRed = "vo/announcer_victory.mp3";
-        SoundFileBlu = "vo/announcer_you_failed.mp3";
-    }
-    // Else the blu team won
-    else
-    {
-        SoundFileBlu = "vo/announcer_victory.mp3";
-        SoundFileRed = "vo/announcer_you_failed.mp3";
-    }
-    if (IsValidClient(red_1))
-        EmitSoundToClient(red_1, SoundFileRed);
+        int client = g_iArenaQueue[arena_index][slot];
+        if (!IsValidClient(client))
+            continue;
 
-    if (IsValidClient(blu_1))
-        EmitSoundToClient(blu_1, SoundFileBlu);
-
-    if (g_bFourPersonArena[arena_index])
-    {
-        int red_2 = g_iArenaQueue[arena_index][SLOT_THREE];
-        int blu_2 = g_iArenaQueue[arena_index][SLOT_FOUR];
-        if (g_iCappingTeam[arena_index] == TEAM_BLU)
-        {
-            if (IsValidClient(red_2))
-                EmitSoundToClient(red_2, SoundFileRed);
-        }
-        else
-        {
-            if (IsValidClient(blu_2))
-                EmitSoundToClient(blu_2, SoundFileBlu);
-        }
+        bool won = redWon ? (slot == SLOT_ONE || slot == SLOT_THREE) : (slot == SLOT_TWO || slot == SLOT_FOUR);
+        EmitSoundToClient(client, won ? "vo/announcer_victory.mp3" : "vo/announcer_you_failed.mp3");
+        EmitGameSoundToClient(client, won ? "Game.YourTeamWon" : "Game.YourTeamLost");
     }
 }
 
@@ -1969,6 +1943,9 @@ Action Timer_StartDuel(Handle timer, any arena_index)
         g_fKothCappedPercent[arena_index] = 0.0;
         g_bOvertimePlayed[arena_index][TEAM_RED] = false;
         g_bOvertimePlayed[arena_index][TEAM_BLU] = false;
+        g_bKothUnlockArmed[arena_index] = false;
+        if (g_bTimerRunning[arena_index])
+            delete g_tKothTimer[arena_index];
         g_tKothTimer[arena_index] = CreateTimer(1.0, Timer_CountDownKoth, arena_index, TIMER_REPEAT);
         g_bTimerRunning[arena_index] = true;
     }

@@ -320,9 +320,9 @@ void Update2v2ReadyStatus(int arena_index)
     {
         Show2v2ReadyHud(arena_index, ready_count);
         
-        if (ready_count == 4)
+        if (ready_count == 4 && g_iArenaStatus[arena_index] == AS_WAITING_READY)
         {
-            // All players ready, start the match
+            SetArenaStatus(arena_index, AS_PRECOUNTDOWN);
             PrintToChatArena(arena_index, "%t", "AllPlayersReady");
             CreateTimer(1.5, Timer_StartDuel, arena_index);
         }

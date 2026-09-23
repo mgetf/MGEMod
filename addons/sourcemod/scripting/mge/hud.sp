@@ -101,15 +101,7 @@ void ShowCriticalGameInfo(int client, int arena_index)
         
             ShowSyncHudText(client, hm_KothTimerBLU, "%i:%02i", g_iKothTimer[arena_index][TEAM_BLU] / 60, g_iKothTimer[arena_index][TEAM_BLU] % 60);
 
-        // Show capture point percentage
-            if (g_iCappingTeam[arena_index] == TEAM_RED)
-                SetHudTextParams(0.50, 0.80, HUDFADEOUTTIME, 255, 0, 0, 255); // Red
-            else if (g_iCappingTeam[arena_index] == TEAM_BLU)
-                SetHudTextParams(0.50, 0.80, HUDFADEOUTTIME, 0, 0, 255, 255); // Blue
-            else
-                SetHudTextParams(0.50, 0.80, HUDFADEOUTTIME, 255, 255, 255, 255);
-        
-            ShowSyncHudText(client, hm_KothCap, "Point Capture: %.1f", g_fKothCappedPercent[arena_index]);
+        ShowKothCaptureHud(client, arena_index);
     }
 
     // Health display with BBall intel integration (always shown to players)
@@ -172,6 +164,124 @@ void ShowCriticalGameInfo(int client, int arena_index)
     }
 }
 
+void CountKothTouchers(int arena_index, int &redCount, int &bluCount)
+{
+    redCount = 0;
+    bluCount = 0;
+    if (g_bPlayerTouchPoint[arena_index][SLOT_ONE])
+        redCount++;
+    if (g_bPlayerTouchPoint[arena_index][SLOT_TWO])
+        bluCount++;
+    if (g_bFourPersonArena[arena_index])
+    {
+        if (g_bPlayerTouchPoint[arena_index][SLOT_THREE])
+            redCount++;
+        if (g_bPlayerTouchPoint[arena_index][SLOT_FOUR])
+            bluCount++;
+    }
+}
+
+void BuildCaptureMeter(float percent, int direction, char[] buffer, int maxlen)
+{
+    int width = 16;
+    if (percent < 0.0)
+        percent = 0.0;
+    else if (percent > 100.0)
+        percent = 100.0;
+
+    int filled = RoundToNearest(percent / 100.0 * float(width));
+    if (filled < 0)
+        filled = 0;
+    else if (filled > width)
+        filled = width;
+
+    char bar[24];
+    int pos = 0;
+    bar[pos++] = '[';
+    for (int i = 0; i < width; i++)
+    {
+        if (filled > 0 && filled < width && i == filled - 1 && direction != 0)
+            bar[pos++] = direction > 0 ? '>' : '<';
+        else if (i < filled)
+            bar[pos++] = '=';
+        else
+            bar[pos++] = '-';
+    }
+    bar[pos++] = ']';
+    bar[pos] = '\0';
+    Format(buffer, maxlen, "%s  %d%%", bar, RoundToNearest(percent));
+}
+
+void ShowKothCaptureHud(int client, int arena_index)
+{
+    if (!g_bArenaKoth[arena_index])
+        return;
+
+    int redCount, bluCount;
+    CountKothTouchers(arena_index, redCount, bluCount);
+
+    int point = g_iPointState[arena_index];
+    float percent = g_fKothCappedPercent[arena_index];
+    bool contested = redCount > 0 && bluCount > 0;
+    bool redCapping = !contested && redCount > 0 && (point == NEUTRAL || point == TEAM_BLU);
+    bool bluCapping = !contested && bluCount > 0 && (point == NEUTRAL || point == TEAM_RED);
+    bool interrupted = percent > 0.5 && !redCapping && !bluCapping && !contested;
+
+    int r = 210;
+    int g = 210;
+    int b = 210;
+    if (redCapping)
+    {
+        r = 255;
+        g = 70;
+        b = 70;
+    }
+    else if (bluCapping)
+    {
+        r = 80;
+        g = 150;
+        b = 255;
+    }
+    else if (interrupted)
+    {
+        r = 255;
+        g = 176;
+        b = 48;
+    }
+    else if (contested)
+    {
+        r = 255;
+        g = 220;
+        b = 40;
+    }
+    else if (point == TEAM_RED)
+    {
+        r = 255;
+        g = 90;
+        b = 90;
+    }
+    else if (point == TEAM_BLU)
+    {
+        r = 90;
+        g = 160;
+        b = 255;
+    }
+
+    int direction = 0;
+    if (g_bKothRulesFromMap[arena_index])
+        direction = g_iKothMeterDir[arena_index];
+    else if (redCapping || bluCapping)
+        direction = 1;
+    else if (interrupted)
+        direction = -1;
+
+    char meter[48];
+    BuildCaptureMeter(percent, direction, meter, sizeof(meter));
+
+    SetHudTextParams(-1.0, 1.0, HUDFADEOUTTIME, r, g, b, 255, 0, 0.0, 0.0, 0.0);
+    ShowSyncHudText(client, hm_KothCap, "%s", meter);
+}
+
 // Shows complete HUD information for both players and spectators
 void ShowFullHud(int client, int arena_index, bool is_spectator)
 {
@@ -207,6 +317,7 @@ void ShowFullHud(int client, int arena_index, bool is_spectator)
 
         SetHudTextParams(0.01, 0.80, HUDFADEOUTTIME, 255, 255, 255, 255);
         ShowSyncHudText(client, hm_HP, hp_report);
+        ShowKothCaptureHud(client, arena_index);
     }
     else
     {
@@ -265,6 +376,9 @@ void HideHud(int client)
 
     ClearSyncHud(client, hm_Score);
     ClearSyncHud(client, hm_HP);
+    ClearSyncHud(client, hm_KothTimerRED);
+    ClearSyncHud(client, hm_KothTimerBLU);
+    ClearSyncHud(client, hm_KothCap);
 }
 
 // ===== HUD FORMATTING FUNCTIONS =====

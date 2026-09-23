@@ -10,12 +10,13 @@
 #include <sourcemod>
 #include <tf2_stocks>
 #include <sdkhooks>
+#include <entitylump>
 #include <morecolors>
 #include <clientprefs>
 #include <convar_class>
 #include <mge>
 
-#define PL_VERSION "3.1.0-beta37"
+#define PL_VERSION "3.1.0-beta38"
 
 #define MAXARENAS 63
 #define MAXSPAWNS 15
@@ -316,6 +317,7 @@ public void OnMapStart()
     for (int i = 0; i < sizeof(stockSounds); i++) {
         PrecacheSound(stockSounds[i], true);
     }
+    PrecacheKothCaptureSounds();
 
     // Models. These are used for the artifical flag in BBall.
     PrecacheModel(MODEL_BRIEFCASE, true);
@@ -375,6 +377,7 @@ public void OnMapStart()
         HookEvent("player_class", Event_Suppress, EventHookMode_Pre);
 
         AddNormalSoundHook(Sound_BlockSound);
+        RequestFrame(Frame_SetupKothCapturePoints);
     } else {
         char configPath[PLATFORM_MAX_PATH];
         BuildPath(Path_SM, configPath, sizeof(configPath), "configs/mge/%s.cfg", g_sMapName);
@@ -780,6 +783,11 @@ Action Event_WinPanel(Event event, const char[] name, bool dontBroadcast)
     // Disable stats so people leaving at the end of the map don't lose points.
     g_bSuppressEloUpdates = true;
     return Plugin_Continue;
+}
+
+void Frame_SetupKothCapturePoints(any data)
+{
+    SetupKothCapturePoints();
 }
 
 // Initialize BBall hoops and KOTH capture points when round starts
