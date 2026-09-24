@@ -1208,6 +1208,60 @@ float KothRespawnDelay(int arena, int client)
     return g_fKothWaveWhenOwner[arena][owner][team];
 }
 
+float UltiduoFreezeTime()
+{
+    float wait = 0.0;
+    ConVar freeze = FindConVar("spec_freeze_time");
+    ConVar travel = FindConVar("spec_freeze_traveltime");
+    if (freeze != null && freeze.FloatValue > 0.0)
+        wait += freeze.FloatValue;
+    if (travel != null && travel.FloatValue > 0.0)
+        wait += travel.FloatValue;
+    return wait;
+}
+
+float UltiduoWaveLength(int arena, int client)
+{
+    if (g_bKothWaveFromMap[arena])
+        return KothRespawnDelay(arena, client);
+
+    ConVar wave = FindConVar("mp_respawnwavetime");
+    if (wave != null && wave.FloatValue > 0.0)
+        return wave.FloatValue;
+    return 10.0;
+}
+
+float UltiduoRespawnDelay(int arena, int client)
+{
+    float now = GetGameTime();
+    float wave = UltiduoWaveLength(arena, client);
+    float earliest = now + 2.0 + UltiduoFreezeTime();
+    if (wave > 0.0)
+        earliest += wave;
+
+    if (wave <= 0.0)
+    {
+        float instant = earliest - now;
+        return instant < 0.0 ? 0.0 : instant;
+    }
+
+    int slot = g_iPlayerSlot[client];
+    int team = (slot == SLOT_ONE || slot == SLOT_THREE) ? TEAM_RED : TEAM_BLU;
+    float next = g_fKothNextWave[arena][team];
+    if (next <= 0.0)
+        next = now + wave;
+    while (next < now)
+        next += wave;
+    g_fKothNextWave[arena][team] = next;
+
+    float spawn = next;
+    while (spawn < earliest)
+        spawn += wave;
+
+    float delay = spawn - now;
+    return delay < 0.0 ? 0.0 : delay;
+}
+
 Action Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast)
 {
     int victim = GetClientOfUserId(event.GetInt("userid"));
@@ -1390,8 +1444,18 @@ Action Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast)
         // TODO: Check to see if its koth and apply a spawn penalty if needed depending on who's capping
         if (g_bArenaBBall[arena_index] || g_bArenaKoth[arena_index])
         {
-            float delay = g_bArenaKoth[arena_index] ? KothRespawnDelay(arena_index, victim) : g_fArenaRespawnTime[arena_index];
-            CreateTimer(delay, Timer_ResetPlayer, GetClientUserId(victim));
+            if (g_bArenaUltiduo[arena_index])
+            {
+                float delay = UltiduoRespawnDelay(arena_index, victim);
+                g_fPlayerRespawnAt[victim] = GetGameTime() + delay;
+                CreateTimer(delay, Timer_UltiduoRespawn, GetClientUserId(victim));
+                CreateTimer(0.1, Timer_RespawnCountdown, GetClientUserId(victim), TIMER_REPEAT);
+            }
+            else
+            {
+                float delay = g_bArenaKoth[arena_index] ? KothRespawnDelay(arena_index, victim) : g_fArenaRespawnTime[arena_index];
+                CreateTimer(delay, Timer_ResetPlayer, GetClientUserId(victim));
+            }
         }
         else if (g_bFourPersonArena[arena_index] && victim_teammate && IsPlayerAlive(victim_teammate))
         {
@@ -1602,6 +1666,44 @@ Action Timer_ResetPlayer(Handle timer, int userid)
         ResetPlayer(client);
     }
     
+    return Plugin_Continue;
+}
+
+Action Timer_UltiduoRespawn(Handle timer, int userid)
+{
+    int client = GetClientOfUserId(userid);
+    if (!IsValidClient(client) || IsPlayerAlive(client))
+        return Plugin_Stop;
+
+    int arena = g_iPlayerArena[client];
+    if (arena <= 0 || !g_bArenaUltiduo[arena] || g_iArenaStatus[arena] != AS_FIGHT || g_bKothRoundPause[arena])
+        return Plugin_Stop;
+
+    g_fPlayerRespawnAt[client] = 0.0;
+    ResetPlayer(client);
+    return Plugin_Stop;
+}
+
+Action Timer_RespawnCountdown(Handle timer, int userid)
+{
+    int client = GetClientOfUserId(userid);
+    if (!IsValidClient(client) || IsPlayerAlive(client) || g_fPlayerRespawnAt[client] <= 0.0)
+    {
+        if (IsValidClient(client))
+            ClearSyncHud(client, hm_HP);
+        return Plugin_Stop;
+    }
+
+    float left = g_fPlayerRespawnAt[client] - GetGameTime();
+    if (left <= 0.0)
+    {
+        g_fPlayerRespawnAt[client] = 0.0;
+        ClearSyncHud(client, hm_HP);
+        return Plugin_Stop;
+    }
+
+    SetHudTextParams(-1.0, 0.11, 1.0, 255, 255, 255, 255, 0, 0.0, 0.0, 0.0);
+    ShowSyncHudText(client, hm_HP, "%t", "RespawnIn", RoundToCeil(left));
     return Plugin_Continue;
 }
 

@@ -162,7 +162,8 @@ float
     g_fKothCapSeconds       [MAXARENAS + 1][4],
     g_fKothUnlockAt         [MAXARENAS + 1],
     g_fKothWaveNeutral      [MAXARENAS + 1][4],
-    g_fKothWaveWhenOwner    [MAXARENAS + 1][4][4];
+    g_fKothWaveWhenOwner    [MAXARENAS + 1][4][4],
+    g_fKothNextWave         [MAXARENAS + 1][4];
 
 bool
     g_bArenaAmmomod         [MAXARENAS + 1],
@@ -187,6 +188,7 @@ bool
     g_bKothWaveFromMap      [MAXARENAS + 1],
     g_bKothUnlockArmed      [MAXARENAS + 1],
     g_bKothRoundPause       [MAXARENAS + 1],
+    g_bKothLoserScream      [MAXPLAYERS + 1],
     g_bKothCanCap           [MAXARENAS + 1][4],
     g_bArenaBoostVectors    [MAXARENAS + 1],
     g_bArenaClassChange     [MAXARENAS + 1];
@@ -253,6 +255,7 @@ bool
     g_bEloSlowRetry         [MAXPLAYERS + 1];
 
 Handle g_hEloRetryTimer     [MAXPLAYERS + 1];
+float g_fPlayerRespawnAt    [MAXPLAYERS + 1];
 int
     g_iEloRetryCount        [MAXPLAYERS + 1],
     g_iPlayerStatsLoadGeneration[MAXPLAYERS + 1];
@@ -327,12 +330,14 @@ char stockSounds[][] =  // Sounds that do not need to be downloaded.
     "vo/intel_enemycaptured.mp3",
     "vo/intel_enemydropped.mp3",
     "vo/intel_enemystolen.mp3",
+    "vo/announcer_ends_60sec.mp3",
+    "vo/announcer_ends_30sec.mp3",
+    "vo/announcer_ends_10sec.mp3",
     "vo/announcer_ends_5sec.mp3",
     "vo/announcer_ends_4sec.mp3",
     "vo/announcer_ends_3sec.mp3",
     "vo/announcer_ends_2sec.mp3",
     "vo/announcer_ends_1sec.mp3",
-    "vo/announcer_ends_10sec.mp3",
     "vo/announcer_control_point_warning.mp3",
     "vo/announcer_control_point_warning2.mp3",
     "vo/announcer_control_point_warning3.mp3",

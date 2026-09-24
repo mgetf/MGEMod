@@ -525,6 +525,9 @@ Action OnTakeDamage(int victim, int &attacker, int &inflictor, float &damage, in
 public Action OnPlayerRunCmd(int client, int& buttons, int& impulse, float vel[3], float angles[3], int& weapon, int& subtype, int& cmdnum, int& tickcount, int& seed, int mouse[2])
 {
     int arena_index = g_iPlayerArena[client];
+    if (arena_index > 0 && g_bKothRoundPause[arena_index] && TF2_IsPlayerInCondition(client, TFCond_Dazed))
+        buttons &= ~(IN_ATTACK | IN_ATTACK2);
+
     if (g_bArenaInfAmmo[arena_index])
     {
         bool shouldRestoreAmmo = view_as<bool>(buttons & IN_ATTACK);
@@ -767,6 +770,12 @@ Action Sound_BlockSound(int clients[MAXPLAYERS], int& numClients, char sample[PL
     }
 
     if (StrContains(sample, "regenerate") >= 0)
+    {
+        return Plugin_Handled;
+    }
+
+    if (entity > 0 && entity <= MaxClients && g_bKothLoserScream[entity]
+        && (StrEqual(soundEntry, "Halloween.PlayerScream", false) || StrContains(sample, "scream", false) != -1))
     {
         return Plugin_Handled;
     }

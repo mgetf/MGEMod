@@ -582,7 +582,22 @@ void FinishKothCapture(int arena_index)
 
     g_fKothCappedPercent[arena_index] = 0.0;
     g_iKothMeterDir[arena_index] = 0;
+    StartKothRespawnWaves(arena_index);
+    SetKothCaptureSound(arena_index, KOTH_SND_IDLE, true);
     UpdateHudForArena(arena_index);
+}
+
+void StartKothRespawnWaves(int arena)
+{
+    int owner = g_iPointState[arena];
+    float now = GetGameTime();
+    for (int team = TEAM_RED; team <= TEAM_BLU; team++)
+    {
+        float wave = (owner == TEAM_RED || owner == TEAM_BLU)
+            ? g_fKothWaveWhenOwner[arena][owner][team]
+            : g_fKothWaveNeutral[arena][team];
+        g_fKothNextWave[arena][team] = wave > 0.0 ? now + wave : 0.0;
+    }
 }
 
 void ApplyMapCaptureRules(int arena)
@@ -1120,13 +1135,13 @@ void EndKoth(any arena_index, any winner_team)
             {
                 CreateTimer(3.0, Timer_StartDuel, arena_index);
             }
-            PlayKothRoundHumiliation(arena_index, winner_team, false);
+            PlayKothRoundHumiliation(arena_index, winner_team, 2.0);
         }
     } else {
         g_bKothRoundPause[arena_index] = true;
         SetKothCaptureSound(arena_index, KOTH_SND_IDLE, false);
-        PlayKothRoundHumiliation(arena_index, winner_team, true);
-        CreateTimer(2.0, Timer_FinishKothRound, arena_index);
+        PlayKothRoundHumiliation(arena_index, winner_team, 10.0);
+        CreateTimer(10.0, Timer_FinishKothRound, arena_index);
     }
 
     UpdateHud(client);
@@ -1139,7 +1154,7 @@ void EndKoth(any arena_index, any winner_team)
     }
 }
 
-void PlayKothRoundHumiliation(int arena, int winner_slot, bool lockDamage)
+void PlayKothRoundHumiliation(int arena, int winner_slot, float duration)
 {
     int maxSlots = g_bFourPersonArena[arena] ? SLOT_FOUR : SLOT_TWO;
     for (int slot = SLOT_ONE; slot <= maxSlots; slot++)
@@ -1148,14 +1163,18 @@ void PlayKothRoundHumiliation(int arena, int winner_slot, bool lockDamage)
         if (!IsValidClient(client) || !IsPlayerAlive(client))
             continue;
 
-        if (lockDamage)
-            SetEntProp(client, Prop_Data, "m_takedamage", 0);
-
         bool winner = winner_slot == SLOT_ONE
             ? (slot == SLOT_ONE || slot == SLOT_THREE)
             : (slot == SLOT_TWO || slot == SLOT_FOUR);
-        if (!winner)
-            TF2_StunPlayer(client, 2.0, 0.0, TF_STUNFLAGS_LOSERSTATE);
+        if (winner)
+        {
+            TF2_AddCondition(client, TFCond_CritOnWin, duration);
+            continue;
+        }
+
+        g_bKothLoserScream[client] = true;
+        TF2_StunPlayer(client, duration, 0.0, TF_STUNFLAG_THIRDPERSON | TF_STUNFLAG_NOSOUNDOREFFECT | TF_STUNFLAG_GHOSTEFFECT);
+        g_bKothLoserScream[client] = false;
     }
 }
 
@@ -1171,7 +1190,7 @@ Action Timer_FinishKothRound(Handle timer, int arena_index)
         if (!IsValidClient(client))
             continue;
 
-        SetEntProp(client, Prop_Data, "m_takedamage", 2);
+        TF2_RemoveCondition(client, TFCond_CritOnWin);
         TF2_RemoveCondition(client, TFCond_Dazed);
         ResetPlayer(client);
     }
@@ -1189,6 +1208,8 @@ Action Timer_FinishKothRound(Handle timer, int arena_index)
     g_bOvertimePlayed[arena_index][TEAM_RED] = false;
     g_bOvertimePlayed[arena_index][TEAM_BLU] = false;
     g_bKothUnlockArmed[arena_index] = false;
+    g_fKothNextWave[arena_index][TEAM_RED] = 0.0;
+    g_fKothNextWave[arena_index][TEAM_BLU] = 0.0;
     g_tKothTimer[arena_index] = CreateTimer(1.0, Timer_CountDownKoth, arena_index, TIMER_REPEAT);
     g_bTimerRunning[arena_index] = true;
     UpdateHudForArena(arena_index);
@@ -1420,11 +1441,18 @@ Action Timer_CountDownKoth(Handle timer, any arena_index)
     }
 
     // Play the count down sounds
-    if (g_iKothTimer[arena_index][g_iPointState[arena_index]] <= 5 && g_iKothTimer[arena_index][g_iPointState[arena_index]] > 0)
+    int kothTimeLeft = g_iKothTimer[arena_index][g_iPointState[arena_index]];
+    if (kothTimeLeft == 60 || kothTimeLeft == 30 || kothTimeLeft == 10 || (kothTimeLeft <= 5 && kothTimeLeft > 0))
     {
         char SoundFile[64];
-        switch (g_iKothTimer[arena_index][g_iPointState[arena_index]])
+        switch (kothTimeLeft)
         {
+            case 60:
+            SoundFile = "vo/announcer_ends_60sec.mp3";
+            case 30:
+            SoundFile = "vo/announcer_ends_30sec.mp3";
+            case 10:
+            SoundFile = "vo/announcer_ends_10sec.mp3";
             case 5:
             SoundFile = "vo/announcer_ends_5sec.mp3";
             case 4:

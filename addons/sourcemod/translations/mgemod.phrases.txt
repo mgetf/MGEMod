@@ -1210,4 +1210,14 @@
 		"es"			"Tienes un {1}% de chances de vencerlos"
 		"pt"			"Você tem {1}% de chances de vencê-los"
 	}
+	"RespawnIn"
+	{
+		"#format"		"{1:i}"
+		"en"			"Respawn in {1}"
+		"chi"			"复活倒计时 {1}"
+		"de"			"Respawn in {1}"
+		"ru"			"Возрождение через {1}"
+		"es"			"Reaparición en {1}"
+		"pt"			"Renasce em {1}"
+	}
 }

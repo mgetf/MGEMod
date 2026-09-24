@@ -87,17 +87,17 @@ void ShowCriticalGameInfo(int client, int arena_index)
     {
         // Show the red team timer
             if (g_iPointState[arena_index] == TEAM_RED)
-                SetHudTextParams(0.40, 0.01, HUDFADEOUTTIME, 255, 0, 0, 255); // Red
+                SetHudTextParams(0.47, 0.06, HUDFADEOUTTIME, 255, 0, 0, 255); // Red
             else
-                SetHudTextParams(0.40, 0.01, HUDFADEOUTTIME, 255, 255, 255, 255);
+                SetHudTextParams(0.47, 0.06, HUDFADEOUTTIME, 255, 255, 255, 255);
 
             ShowSyncHudText(client, hm_KothTimerRED, "%i:%02i", g_iKothTimer[arena_index][TEAM_RED] / 60, g_iKothTimer[arena_index][TEAM_RED] % 60);
 
         // Show the blue team timer
             if (g_iPointState[arena_index] == TEAM_BLU)
-                SetHudTextParams(0.60, 0.01, HUDFADEOUTTIME, 0, 0, 255, 255); // Blue
+                SetHudTextParams(0.53, 0.06, HUDFADEOUTTIME, 0, 0, 255, 255); // Blue
             else
-                SetHudTextParams(0.60, 0.01, HUDFADEOUTTIME, 255, 255, 255, 255);
+                SetHudTextParams(0.53, 0.06, HUDFADEOUTTIME, 255, 255, 255, 255);
         
             ShowSyncHudText(client, hm_KothTimerBLU, "%i:%02i", g_iKothTimer[arena_index][TEAM_BLU] / 60, g_iKothTimer[arena_index][TEAM_BLU] % 60);
 
@@ -130,7 +130,7 @@ void ShowCriticalGameInfo(int client, int arena_index)
             ShowSyncHudText(client, hm_HP, hud_text, g_iPlayerHP[client]);
         }
     }
-    else
+    else if (g_fPlayerRespawnAt[client] <= GetGameTime())
     {
         // Regular health display for non-BBall arenas
         if (g_bArenaShowHPToPlayers[arena_index])
@@ -154,14 +154,15 @@ void ShowCriticalGameInfo(int client, int arena_index)
         }
     }
 
-    // Teammate HP display for 2v2 (always shown to players)
-    if (g_bFourPersonArena[arena_index] && client_teammate)
+    if (g_bFourPersonArena[arena_index] && client_teammate && g_bArenaShowHPToPlayers[arena_index])
     {
         char hp_report[128];
         Format(hp_report, sizeof(hp_report), "%N : %d", client_teammate, g_iPlayerHP[client_teammate]);
         SetHudTextParams(0.01, 0.80, HUDFADEOUTTIME, 255, 255, 255, 255);
         ShowSyncHudText(client, hm_TeammateHP, hp_report);
     }
+    else
+        ClearSyncHud(client, hm_TeammateHP);
 }
 
 void CountKothTouchers(int arena_index, int &redCount, int &bluCount)
@@ -277,8 +278,15 @@ void ShowKothCaptureHud(int client, int arena_index)
 
     char meter[48];
     BuildCaptureMeter(percent, direction, meter, sizeof(meter));
+    int cappers = 0;
+    if (redCapping)
+        cappers = redCount;
+    else if (bluCapping)
+        cappers = bluCount;
+    if (cappers > 0)
+        Format(meter, sizeof(meter), "%s  x%d", meter, cappers);
 
-    SetHudTextParams(-1.0, 1.0, HUDFADEOUTTIME, r, g, b, 255, 0, 0.0, 0.0, 0.0);
+    SetHudTextParams(-1.0, 0.95, HUDFADEOUTTIME, r, g, b, 255, 0, 0.0, 0.0, 0.0);
     ShowSyncHudText(client, hm_KothCap, "%s", meter);
 }
 

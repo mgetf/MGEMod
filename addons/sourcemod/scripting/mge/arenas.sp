@@ -1944,6 +1944,8 @@ Action Timer_StartDuel(Handle timer, any arena_index)
         g_bOvertimePlayed[arena_index][TEAM_RED] = false;
         g_bOvertimePlayed[arena_index][TEAM_BLU] = false;
         g_bKothUnlockArmed[arena_index] = false;
+        g_fKothNextWave[arena_index][TEAM_RED] = 0.0;
+        g_fKothNextWave[arena_index][TEAM_BLU] = 0.0;
         if (g_bTimerRunning[arena_index])
             delete g_tKothTimer[arena_index];
         g_tKothTimer[arena_index] = CreateTimer(1.0, Timer_CountDownKoth, arena_index, TIMER_REPEAT);
