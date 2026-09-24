@@ -525,6 +525,14 @@ Action OnTakeDamage(int victim, int &attacker, int &inflictor, float &damage, in
 public Action OnPlayerRunCmd(int client, int& buttons, int& impulse, float vel[3], float angles[3], int& weapon, int& subtype, int& cmdnum, int& tickcount, int& seed, int mouse[2])
 {
     int arena_index = g_iPlayerArena[client];
+    if (arena_index > 0 && g_bArenaUltiduo[arena_index] && g_iPlayerSlot[client] > 0
+        && GetGameTime() < g_fUltiduoMoveUnlockAt[arena_index])
+    {
+        vel[0] = 0.0;
+        vel[1] = 0.0;
+        buttons &= ~(IN_FORWARD | IN_BACK | IN_MOVELEFT | IN_MOVERIGHT);
+    }
+
     if (arena_index > 0 && g_bKothRoundPause[arena_index] && TF2_IsPlayerInCondition(client, TFCond_Dazed))
         buttons &= ~(IN_ATTACK | IN_ATTACK2);
 

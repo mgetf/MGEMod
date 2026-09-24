@@ -220,6 +220,11 @@ void ShowKothCaptureHud(int client, int arena_index)
 
     int redCount, bluCount;
     CountKothTouchers(arena_index, redCount, bluCount);
+    if (g_bKothRoundPause[arena_index])
+    {
+        redCount = 0;
+        bluCount = 0;
+    }
 
     int point = g_iPointState[arena_index];
     float percent = g_fKothCappedPercent[arena_index];

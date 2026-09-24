@@ -1212,6 +1212,8 @@ Action Timer_FinishKothRound(Handle timer, int arena_index)
     g_fKothNextWave[arena_index][TEAM_BLU] = 0.0;
     g_tKothTimer[arena_index] = CreateTimer(1.0, Timer_CountDownKoth, arena_index, TIMER_REPEAT);
     g_bTimerRunning[arena_index] = true;
+    if (g_bArenaUltiduo[arena_index])
+        g_fUltiduoMoveUnlockAt[arena_index] = GetGameTime() + 5.0;
     UpdateHudForArena(arena_index);
     return Plugin_Stop;
 }

@@ -163,7 +163,8 @@ float
     g_fKothUnlockAt         [MAXARENAS + 1],
     g_fKothWaveNeutral      [MAXARENAS + 1][4],
     g_fKothWaveWhenOwner    [MAXARENAS + 1][4][4],
-    g_fKothNextWave         [MAXARENAS + 1][4];
+    g_fKothNextWave         [MAXARENAS + 1][4],
+    g_fUltiduoMoveUnlockAt  [MAXARENAS + 1];
 
 bool
     g_bArenaAmmomod         [MAXARENAS + 1],

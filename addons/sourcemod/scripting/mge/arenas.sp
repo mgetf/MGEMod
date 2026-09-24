@@ -1814,6 +1814,8 @@ Action Timer_CountDown(Handle timer, any arena_index)
             } else if (g_iArenaCd[arena_index] <= 0) {
                 SetArenaStatus(arena_index, AS_FIGHT);
                 g_iArenaDuelStartTime[arena_index] = GetTime(); // Capture duel start time
+                if (g_bArenaUltiduo[arena_index])
+                    g_fUltiduoMoveUnlockAt[arena_index] = GetGameTime() + 5.0;
                 char msg[64];
                 Format(msg, sizeof(msg), "FIGHT", g_iArenaCd[arena_index]);
                 PrintCenterText(red_f1, msg);
@@ -1889,6 +1891,8 @@ Action Timer_CountDown(Handle timer, any arena_index)
             } else if (g_iArenaCd[arena_index] <= 0) {
                 SetArenaStatus(arena_index, AS_FIGHT);
                 g_iArenaDuelStartTime[arena_index] = GetTime(); // Capture duel start time
+                if (g_bArenaUltiduo[arena_index])
+                    g_fUltiduoMoveUnlockAt[arena_index] = GetGameTime() + 5.0;
                 char msg[64];
                 Format(msg, sizeof(msg), "FIGHT", g_iArenaCd[arena_index]);
                 PrintCenterText(red_f1, msg);
