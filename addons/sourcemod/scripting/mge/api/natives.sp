@@ -20,6 +20,9 @@ void RegisterNatives()
     CreateNative("MGE_IsValidSlotForArena", Native_IsValidSlotForArena);
     CreateNative("MGE_GetArenaScore", Native_GetArenaScore);
     CreateNative("MGE_ReportConfigUnavailable", Native_ReportConfigUnavailable);
+    CreateNative("MGE_GetArenaWhitelist", Native_GetArenaWhitelist);
+    CreateNative("MGE_SetArenaWhitelistOverride", Native_SetArenaWhitelistOverride);
+    CreateNative("MGE_ClearArenaWhitelistOverride", Native_ClearArenaWhitelistOverride);
 }
 
 // ===== PLAYER INFORMATION NATIVES =====
@@ -355,6 +358,71 @@ int Native_GetArenaInfo(Handle plugin, int numParams)
     info.fragLimit = g_iArenaFraglimit[arena_index];
 
     SetNativeArray(2, info, sizeof(info));
+    return true;
+}
+
+int Native_GetArenaWhitelist(Handle plugin, int numParams)
+{
+    int arena_index = GetNativeCell(1);
+    int maxlength = GetNativeCell(3);
+
+    if (arena_index < 1 || arena_index > g_iArenaCount)
+    {
+        SetNativeString(2, "", maxlength);
+        SetNativeCellRef(4, false);
+        return 0;
+    }
+
+    bool overridden = g_bArenaWhitelistOverride[arena_index];
+    SetNativeCellRef(4, overridden);
+    if (overridden)
+        SetNativeString(2, g_sArenaWhitelistOverride[arena_index], maxlength);
+    else
+        SetNativeString(2, g_sArenaWhitelistId[arena_index], maxlength);
+    return 0;
+}
+
+int Native_SetArenaWhitelistOverride(Handle plugin, int numParams)
+{
+    int arena_index = GetNativeCell(1);
+    if (arena_index < 1 || arena_index > g_iArenaCount)
+    {
+        ThrowNativeError(SP_ERROR_PARAM, "Invalid arena index %d", arena_index);
+        return false;
+    }
+
+    char id[64];
+    GetNativeString(2, id, sizeof(id));
+    TrimString(id);
+    if (id[0] == '\0')
+    {
+        ThrowNativeError(SP_ERROR_PARAM, "Whitelist id must not be empty");
+        return false;
+    }
+
+    bool unchanged = g_bArenaWhitelistOverride[arena_index] && StrEqual(g_sArenaWhitelistOverride[arena_index], id);
+    strcopy(g_sArenaWhitelistOverride[arena_index], sizeof(g_sArenaWhitelistOverride[]), id);
+    g_bArenaWhitelistOverride[arena_index] = true;
+    if (!unchanged)
+        CallForward_OnArenaWhitelistChanged(arena_index);
+    return true;
+}
+
+int Native_ClearArenaWhitelistOverride(Handle plugin, int numParams)
+{
+    int arena_index = GetNativeCell(1);
+    if (arena_index < 1 || arena_index > g_iArenaCount)
+    {
+        ThrowNativeError(SP_ERROR_PARAM, "Invalid arena index %d", arena_index);
+        return false;
+    }
+
+    if (!g_bArenaWhitelistOverride[arena_index])
+        return true;
+
+    g_bArenaWhitelistOverride[arena_index] = false;
+    g_sArenaWhitelistOverride[arena_index][0] = '\0';
+    CallForward_OnArenaWhitelistChanged(arena_index);
     return true;
 }
 

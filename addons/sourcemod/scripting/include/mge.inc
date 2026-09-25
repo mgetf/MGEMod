@@ -295,6 +295,15 @@ forward Action MGE_OnMapConfigMissing(const char[] mapName, const char[] configP
 forward Action MGE_OnMapConfigInvalid(const char[] mapName, const char[] configPath);
 
 /**
+ * Called when an arena's effective whitelist.tf id changes.
+ * Fires when a plugin sets or clears a whitelist override. The cfg default
+ * does not fire this; read MGE_GetArenaWhitelist after map load instead.
+ *
+ * @param arena_index    Arena index
+ */
+forward void MGE_OnArenaWhitelistChanged(int arena_index);
+
+/**
  * Reports that a previously deferred config download has failed and no config is available.
  * MGEMod will disable itself on the next game frame.
  * Only has effect after Plugin_Handled was returned from MGE_OnMapConfigMissing.
@@ -444,6 +453,37 @@ native bool MGE_IsValidSlotForArena(int arena_index, int slot);
  */
 native int MGE_GetArenaScore(int arena_index, int team_slot);
 
+/**
+ * Gets the effective whitelist.tf id for an arena.
+ * Override wins over the arena cfg. An empty id means no whitelist.
+ *
+ * @param arena_index    Arena index
+ * @param id             Buffer for the whitelist.tf id or slug
+ * @param maxlength      Size of id
+ * @param overridden     Set to true if a plugin override is active
+ */
+native void MGE_GetArenaWhitelist(int arena_index, char[] id, int maxlength, bool &overridden);
+
+/**
+ * Sets a whitelist.tf id that replaces the arena cfg until cleared.
+ * An empty id is rejected.
+ *
+ * @param arena_index    Arena index
+ * @param id             whitelist.tf numeric id or slug
+ * @return               True on success
+ * @error                Invalid arena, or empty id
+ */
+native bool MGE_SetArenaWhitelistOverride(int arena_index, const char[] id);
+
+/**
+ * Clears a whitelist override so the arena cfg id applies again.
+ *
+ * @param arena_index    Arena index
+ * @return               True on success
+ * @error                Invalid arena
+ */
+native bool MGE_ClearArenaWhitelistOverride(int arena_index);
+
 
 public SharedPlugin __pl_mge = 
 {
@@ -475,5 +515,8 @@ public void __pl_mge_SetNTVOptional()
     MarkNativeAsOptional("MGE_ArenaHasGameMode");
     MarkNativeAsOptional("MGE_IsValidSlotForArena");
     MarkNativeAsOptional("MGE_GetArenaScore");
+    MarkNativeAsOptional("MGE_GetArenaWhitelist");
+    MarkNativeAsOptional("MGE_SetArenaWhitelistOverride");
+    MarkNativeAsOptional("MGE_ClearArenaWhitelistOverride");
 }
 #endif

@@ -145,7 +145,9 @@ bool g_tfctClassAllowed[10];
 Handle g_tKothTimer         [MAXARENAS + 1];
 char
     g_sArenaName            [MAXARENAS + 1][64],
-    g_sArenaOriginalName    [MAXARENAS + 1][64];
+    g_sArenaOriginalName    [MAXARENAS + 1][64],
+    g_sArenaWhitelistId     [MAXARENAS + 1][64],
+    g_sArenaWhitelistOverride[MAXARENAS + 1][64];
 
 float
     g_fArenaSpawnOrigin     [MAXARENAS + 1][MAXSPAWNS+1][3],
@@ -192,7 +194,8 @@ bool
     g_bKothLoserScream      [MAXPLAYERS + 1],
     g_bKothCanCap           [MAXARENAS + 1][4],
     g_bArenaBoostVectors    [MAXARENAS + 1],
-    g_bArenaClassChange     [MAXARENAS + 1];
+    g_bArenaClassChange     [MAXARENAS + 1],
+    g_bArenaWhitelistOverride[MAXARENAS + 1];
 
 int
     g_iArenaCount,
@@ -372,3 +375,4 @@ GlobalForward g_hOnArenaStatusChange;
 GlobalForward g_hOnMapConfigMissing;
 GlobalForward g_hOnMapConfigInvalid;
 GlobalForward g_hOnFormatHudLines;
+GlobalForward g_hOnArenaWhitelistChanged;

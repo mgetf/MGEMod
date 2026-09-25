@@ -21,6 +21,7 @@ void RegisterForwards()
     g_hOnMapConfigMissing = new GlobalForward("MGE_OnMapConfigMissing", ET_Hook, Param_String, Param_String);
     g_hOnMapConfigInvalid = new GlobalForward("MGE_OnMapConfigInvalid", ET_Hook, Param_String, Param_String);
     g_hOnFormatHudLines = new GlobalForward("MGE_OnFormatHudLines", ET_Ignore, Param_Cell, Param_Cell, Param_Cell, Param_Array, Param_Array);
+    g_hOnArenaWhitelistChanged = new GlobalForward("MGE_OnArenaWhitelistChanged", ET_Ignore, Param_Cell);
 }
 
 // ===== FORWARD CALL HELPERS =====
@@ -230,4 +231,11 @@ Action CallForward_OnMapConfigInvalid(const char[] mapName, const char[] configP
     Call_PushString(configPath);
     Call_Finish(result);
     return result;
+}
+
+void CallForward_OnArenaWhitelistChanged(int arena_index)
+{
+    Call_StartForward(g_hOnArenaWhitelistChanged);
+    Call_PushCell(arena_index);
+    Call_Finish();
 }

@@ -309,6 +309,9 @@ int LoadSpawnPoints()
     {
         g_iArenaSpawns[j] = 0;
         g_iArenaRedSpawnCount[j] = 0;
+        g_sArenaWhitelistId[j][0] = '\0';
+        g_sArenaWhitelistOverride[j][0] = '\0';
+        g_bArenaWhitelistOverride[j] = false;
     }
 
     if (!FileExists(txtfile))
@@ -381,6 +384,8 @@ int LoadSpawnPoints()
         char sAllowedClasses[128];
         kv.GetString("allowed_classes", sAllowedClasses, sizeof(sAllowedClasses));
         ParseAllowedClasses(sAllowedClasses, g_tfctArenaAllowedClasses[g_iArenaCount]);
+
+        kv.GetString("whitelist_id", g_sArenaWhitelistId[g_iArenaCount], sizeof(g_sArenaWhitelistId[]), "");
 
         // Schema validation
         if (!ValidateArenaSchema(g_iArenaCount))
