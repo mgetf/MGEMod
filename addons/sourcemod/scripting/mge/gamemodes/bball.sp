@@ -236,8 +236,6 @@ Action OnTouchHoop(int entity, int other)
         char client_name[MAX_NAME_LENGTH];
         GetClientName(client, client_name, sizeof(client_name));
 
-        MC_PrintToChat(client, "%t", "bballdunk", foe_name);
-
         g_bPlayerHasIntel[client] = false;
         AddArenaTeamScore(arena_index, client_team_slot);
 
