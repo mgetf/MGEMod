@@ -157,7 +157,8 @@ Action Timer_ChangeSpecTarget(Handle timer, int userid)
     return Plugin_Stop;
 }
 
-// Shows periodic advertisements to spectators not in arenas
+// Shows the join advertisement to spectators not in arenas.
+// Repeats every mgemod_adv_interval seconds. Interval 0 prints once, then stops.
 Action Timer_ShowAdv(Handle timer, int userid)
 {
     int client = GetClientOfUserId(userid);
@@ -165,7 +166,8 @@ Action Timer_ShowAdv(Handle timer, int userid)
     if (IsValidClient(client) && g_iPlayerArena[client] == 0)
     {
         MC_PrintToChat(client, "%t", "Adv");
-        CreateTimer(15.0, Timer_ShowAdv, userid);
+        if (g_fAdvInterval > 0.0)
+            CreateTimer(g_fAdvInterval, Timer_ShowAdv, userid);
     }
 
     return Plugin_Continue;

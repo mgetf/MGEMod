@@ -127,6 +127,7 @@ public void OnPluginStart()
     gcvar_glickoPeriodMinute = new Convar("mgemod_glicko_period_minute", "20", "Local minute (0-59) of the period boundary. Only used when mgemod_rating_engine is \"glicko2\".", FCVAR_NONE, true, 0.0, true, 59.0);
     gcvar_glickoPeriodUtcOffset = new Convar("mgemod_glicko_period_utc_offset", "-3", "Hours added to UTC to get local time for the period boundary (ART is -3). Only used when mgemod_rating_engine is \"glicko2\".");
     gcvar_glickoPeriodClose = new Convar("mgemod_glicko_period_close", "0", "This instance runs Glicko-2 period close. Set 1 only on the srcds that shares the box with MariaDB (localhost). Other game servers in the region leave this at 0. Only used when mgemod_rating_engine is \"glicko2\".", FCVAR_NONE, true, 0.0, true, 1.0);
+    gcvar_advInterval = new Convar("mgemod_adv_interval", "0", "Seconds between spectator join advertisements (!add / !mgehelp). 0 = print once on join, then stop.", FCVAR_NONE, true, 0.0);
 
     // Create config file
     Convar.CreateConfig("mge");
@@ -152,6 +153,7 @@ public void OnPluginStart()
     g_iGlickoPeriodMinute = gcvar_glickoPeriodMinute.IntValue;
     g_iGlickoPeriodUtcOffset = gcvar_glickoPeriodUtcOffset.IntValue;
     g_bGlickoPeriodCloseEnabled = gcvar_glickoPeriodClose.IntValue ? true : false;
+    g_fAdvInterval = gcvar_advInterval.FloatValue;
 
     char sRatingEngine[16];
     gcvar_ratingEngine.GetString(sRatingEngine, sizeof(sRatingEngine));
@@ -207,6 +209,7 @@ public void OnPluginStart()
     gcvar_glickoPeriodMinute.AddChangeHook(handler_ConVarChange);
     gcvar_glickoPeriodUtcOffset.AddChangeHook(handler_ConVarChange);
     gcvar_glickoPeriodClose.AddChangeHook(handler_ConVarChange);
+    gcvar_advInterval.AddChangeHook(handler_ConVarChange);
 
     // Client commands
     RegConsoleCmd("mgemod", Command_Menu, "MGEMod Menu");
@@ -684,6 +687,8 @@ void handler_ConVarChange(Handle convar, const char[] oldValue, const char[] new
         g_iGlickoPeriodUtcOffset = intValue;
     else if (convar == gcvar_glickoPeriodClose)
         g_bGlickoPeriodCloseEnabled = boolValue;
+    else if (convar == gcvar_advInterval)
+        g_fAdvInterval = floatValue;
 }
 
 

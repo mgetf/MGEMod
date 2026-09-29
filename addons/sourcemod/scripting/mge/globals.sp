@@ -105,6 +105,7 @@ Handle g_hDBReconnectTimer;
 
 char g_sDBConfig[256];
 int g_iReconnectInterval;
+float g_fAdvInterval;
 
 // Global CVar Handles
 Convar
@@ -136,7 +137,8 @@ Convar
     gcvar_glickoPeriodHour,
     gcvar_glickoPeriodMinute,
     gcvar_glickoPeriodUtcOffset,
-    gcvar_glickoPeriodClose;
+    gcvar_glickoPeriodClose,
+    gcvar_advInterval;
 
 // Classes
 bool g_tfctClassAllowed[10];
