@@ -48,14 +48,14 @@ int LoadNumberedSpawns(KeyValues kv, int arena, int offset, TFClassType classTag
 
     do
     {
-        loaded++;
-        int idx = offset + loaded;
+        int idx = offset + loaded + 1;
         if (idx > MAXSPAWNS)
         {
             LogError("Arena '%s': Exceeded max spawns (%d)", g_sArenaOriginalName[arena], MAXSPAWNS);
             break;
         }
 
+        loaded++;
         IntToString(loaded, numStr, sizeof(numStr));
         IntToString(loaded + 1, nextStr, sizeof(nextStr));
         kv.GetString(numStr, raw, sizeof(raw));

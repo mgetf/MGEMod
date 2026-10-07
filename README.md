@@ -21,6 +21,7 @@ This is a fork of sappho's repository, with the following improvements:
 * `mgemod_glicko_provisional_rd` (float) - RD threshold above which a player's rating is considered provisional. Only used when `mgemod_rating_engine` is `glicko2`.
 * `mgemod_glicko_ranked_rd` (float) - RD threshold a player must be below to appear on `!top` and external leaderboards. Only used when `mgemod_rating_engine` is `glicko2`.
 * `mgemod_glicko_ranked_min_games` (int) - minimum games (wins+losses) a player needs to appear on `!top` and external leaderboards. Only used when `mgemod_rating_engine` is `glicko2`.
+* `mgemod_adv_interval` (float, default 0) - seconds between spectator join advertisements (`!add` / `!mgehelp`). `0` prints once a few seconds after join, then never again. Previously hardcoded to every 15 seconds.
 
 ## Rating Engines
 
@@ -140,7 +141,7 @@ SpawnConfigs
 }
 ```
 
-**Hard limits:** maximum **63 arenas** per file, maximum **15 spawns** per arena.
+**Hard limits:** maximum **63 arenas** per file, maximum **128 spawns** per arena.
 
 ---
 

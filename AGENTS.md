@@ -68,7 +68,7 @@ The public API header. Contains:
 
 | Concept | Description |
 |---------|-------------|
-| **Arena** | A labeled duel area on a map. Defined per-map in `configs/mge/<mapname>.cfg`. Max 63 arenas, 15 spawns each. |
+| **Arena** | A labeled duel area on a map. Defined per-map in `configs/mge/<mapname>.cfg`. Max 63 arenas, 128 spawns each. |
 | **Gamemode** | Per-arena mode: `mge`, `bball`, `koth`, `ammomod`, `midair`, `endif`, `ultiduo`, `turris`. Stored as bitmask flags. |
 | **Slot** | Player position in an arena (1–4). Slots 1–2 for 1v1, slots 1–4 for 2v2. |
 | **Queue** | Players join arenas via `!add` or menu. Losers rotate out when queue has waiting players. |
@@ -147,4 +147,4 @@ Schema is managed through `migrations.sp` — migrations run automatically on pl
 - **SourcePawn limitations**: no classes/inheritance, limited string handling, fixed-size arrays. Use `enum struct` for structured data.
 - **Include order matters**: modules in `mge.sp` are included in dependency order. Don't rearrange without checking cross-references.
 - **No separate compilation**: all `.sp` files under `mge/` are `#include`d into `mge.sp`. They share the global scope.
-- **Array bounds**: `MAXARENAS` (63) and `MAXSPAWNS` (15) are hard limits. Always bounds-check arena/spawn indices.
+- **Array bounds**: `MAXARENAS` (63) and `MAXSPAWNS` (128) are hard limits. Always bounds-check arena/spawn indices.

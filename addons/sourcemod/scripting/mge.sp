@@ -16,10 +16,10 @@
 #include <convar_class>
 #include <mge>
 
-#define PL_VERSION "3.1.0-beta38"
+#define PL_VERSION "3.1.0-beta39"
 
 #define MAXARENAS 63
-#define MAXSPAWNS 15
+#define MAXSPAWNS 128
 #define HUDFADEOUTTIME 120.0
 
 #pragma newdecls required
