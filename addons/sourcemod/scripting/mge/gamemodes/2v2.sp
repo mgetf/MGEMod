@@ -168,17 +168,9 @@ int Menu_2v2Selection(Menu menu, MenuAction action, int param1, int param2)
         }
         case MenuAction_Cancel:
         {
-            // Player cancelled - only clear arena assignment if they weren't in an arena before
+            // Player cancelled. The menu only uses g_iPendingArena, so the real arena/slot stay
+            // untouched (clearing them here orphaned waiting-line queue entries as ghosts).
             int client = param1;
-            int current_slot = g_iPlayerSlot[client];
-            
-            // Only clear arena assignment if player wasn't actually placed in a slot yet
-            // (This handles the case where we temporarily set arena during menu display)
-            if (g_iPlayerArena[client] && (current_slot < SLOT_ONE || current_slot > SLOT_FOUR))
-            {
-                g_iPlayerArena[client] = 0;
-                g_iPlayerSlot[client] = 0;
-            }
 
             // Always clear pending arena on cancel
             g_iPendingArena[client] = 0;

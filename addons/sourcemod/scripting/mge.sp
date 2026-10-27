@@ -16,7 +16,7 @@
 #include <convar_class>
 #include <mge>
 
-#define PL_VERSION "3.1.0-beta39"
+#define PL_VERSION "3.1.0-beta41"
 
 #define MAXARENAS 63
 #define MAXSPAWNS 128
@@ -339,6 +339,9 @@ public void OnMapStart()
         GetMapDisplayName(sCheckMap, sCheckMap, sizeof(sCheckMap));
     if (StrContains(sCheckMap, "mge_", false) != 0)
         SetFailState("Map '%s' is not an MGE map. MGEMod disabled.", sCheckMap);
+
+    // Arena indices mean different arenas on the new map, so no queue entry may carry over
+    ResetAllArenaQueues();
 
     // Spawns
     int loadResult = LoadSpawnPoints();

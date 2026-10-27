@@ -3,6 +3,11 @@
 // Initialize basic client data when they connect (regardless of Steam status)
 void HandleClientConnection(int client)
 {
+    // A fresh client owns no arena slot; drop anything a previous holder of this index left behind
+    g_iPlayerArena[client] = 0;
+    g_iPlayerSlot[client] = 0;
+    PurgeStaleQueueEntries(client);
+
     if (IsFakeClient(client))
         return;
 
@@ -65,7 +70,8 @@ void HandleClientDisconnection(int client)
     
     if (IsValidClient(client, true) && g_iPlayerArena[client])
     {
-        RemoveFromQueue(client, true);
+        // Disconnects can't be blocked by OnPlayerArenaRemove, or the slot keeps a ghost client
+        RemoveFromQueue(client, true, true, true);
     }
     else
     {
@@ -130,6 +136,11 @@ void HandleClientDisconnection(int client)
 
         SetArenaStatus(arena_index, AS_IDLE);
     }
+
+    // Whatever path ran above, this index must not stay in any queue after it leaves
+    g_iPlayerArena[client] = 0;
+    g_iPlayerSlot[client] = 0;
+    PurgeStaleQueueEntries(client);
 
     ResetPlayerStatsIdentity(client);
 }

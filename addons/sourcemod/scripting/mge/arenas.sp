@@ -484,8 +484,9 @@ void SetArenaStatus(int arena_index, int status)
 // ===== QUEUE MANAGEMENT =====
 
 // Remove player from arena queue with optional statistics calculation and spectator handling
+// force = true ignores a blocking OnPlayerArenaRemove (disconnects must always free the slot)
 // TODO: refactor this crap
-void RemoveFromQueue(int client, bool calcstats = false, bool specfix = true)
+void RemoveFromQueue(int client, bool calcstats = false, bool specfix = true, bool force = false)
 {
     int arena_index = g_iPlayerArena[client];
 
@@ -493,10 +494,10 @@ void RemoveFromQueue(int client, bool calcstats = false, bool specfix = true)
     {
         return;
     }
-    
+
     // Call OnPlayerArenaRemove forward - allow blocking
     Action result = CallForward_OnPlayerArenaRemove(client, arena_index);
-    if (result >= Plugin_Handled)
+    if (result >= Plugin_Handled && !force)
         return;
 
     int player_slot = g_iPlayerSlot[client];
@@ -690,9 +691,101 @@ void RemoveFromQueue(int client, bool calcstats = false, bool specfix = true)
     }
     
     UpdateHudForArena(arena_index);
-    
+
     // Call OnPlayerArenaRemoved forward
     CallForward_OnPlayerArenaRemoved(client, arena_index);
+}
+
+// Clear every arena queue and per-player arena assignment (map start: arena indices change meaning)
+void ResetAllArenaQueues()
+{
+    for (int arena_index = 0; arena_index <= MAXARENAS; arena_index++)
+    {
+        for (int slot = 0; slot <= MAXPLAYERS; slot++)
+            g_iArenaQueue[arena_index][slot] = 0;
+
+        g_iArenaStatus[arena_index] = AS_IDLE;
+        g_iArenaScore[arena_index][SLOT_ONE] = 0;
+        g_iArenaScore[arena_index][SLOT_TWO] = 0;
+    }
+
+    for (int client = 0; client <= MAXPLAYERS; client++)
+    {
+        g_iPlayerArena[client] = 0;
+        g_iPlayerSlot[client] = 0;
+        g_bPlayer2v2Ready[client] = false;
+    }
+}
+
+// Remove queue entries that hold this client index but don't match its arena/slot bookkeeping.
+// These "ghost" entries survive a blocked removal or a reused client index and would otherwise
+// make the client count as playing in an arena it is not in.
+void PurgeStaleQueueEntries(int client)
+{
+    for (int arena_index = 1; arena_index <= g_iArenaCount; arena_index++)
+    {
+        int active_slots = g_bFourPersonArena[arena_index] ? SLOT_FOUR : SLOT_TWO;
+        int slot = SLOT_ONE;
+        // Fighting slots may have gaps; the waiting line behind them ends at the first empty slot
+        while (slot <= MAXPLAYERS && (slot <= active_slots || g_iArenaQueue[arena_index][slot]))
+        {
+            if (g_iArenaQueue[arena_index][slot] == client
+                && (g_iPlayerArena[client] != arena_index || g_iPlayerSlot[client] != slot))
+            {
+                LogError("Removed stale queue entry for client %d in arena %d slot %d", client, arena_index, slot);
+                DropQueueSlot(arena_index, slot);
+                // DropQueueSlot shifts the queue, so re-check this same slot
+                continue;
+            }
+            slot++;
+        }
+    }
+}
+
+// Empty one queue slot without touching the client it pointed to, then refill / compact the queue
+void DropQueueSlot(int arena_index, int slot)
+{
+    int active_slots = g_bFourPersonArena[arena_index] ? SLOT_FOUR : SLOT_TWO;
+    int hole = slot;
+
+    g_iArenaQueue[arena_index][slot] = 0;
+
+    if (slot <= active_slots)
+    {
+        int next_client = g_iArenaQueue[arena_index][active_slots + 1];
+        if (!next_client)
+        {
+            // Nobody waiting: the fighting slots keep their positions, the arena just stops
+            SetArenaStatus(arena_index, AS_IDLE);
+            UpdateHudForArena(arena_index);
+            return;
+        }
+
+        // Promote the first waiting player into the freed fighting slot
+        g_iArenaQueue[arena_index][slot] = next_client;
+        g_iPlayerSlot[next_client] = slot;
+        g_iArenaQueue[arena_index][active_slots + 1] = 0;
+        hole = active_slots + 1;
+
+        if (g_bFourPersonArena[arena_index])
+            CreateTimer(2.0, Timer_Restart2v2Ready, arena_index);
+        else
+            CreateTimer(2.0, Timer_StartDuel, arena_index);
+    }
+
+    // Shift the waiting line behind the hole one slot forward
+    int from = hole + 1;
+    while (from <= MAXPLAYERS && g_iArenaQueue[arena_index][from])
+    {
+        int moved = g_iArenaQueue[arena_index][from];
+        g_iArenaQueue[arena_index][from - 1] = moved;
+        if (g_iPlayerArena[moved] == arena_index && g_iPlayerSlot[moved] == from)
+            g_iPlayerSlot[moved] = from - 1;
+        from++;
+    }
+    g_iArenaQueue[arena_index][from - 1] = 0;
+
+    UpdateHudForArena(arena_index);
 }
 
 bool CanPlayerJoinArena(int client, int arena_index, bool showmsg)
@@ -743,6 +836,9 @@ void AddInQueue(int client, int arena_index, bool showmsg = true, int playerPref
 
     if (!CanPlayerJoinArena(client, arena_index, showmsg))
         return;
+
+    // Never let a leftover entry make this client sit in two slots at once
+    PurgeStaleQueueEntries(client);
 
     // Handle case where player is already in an arena
     if (g_iPlayerArena[client])
@@ -862,6 +958,10 @@ void AddInQueue(int client, int arena_index, bool showmsg = true, int playerPref
     if (g_iPlayerArena[client] && g_iPlayerArena[client] != arena_index)
     {
         RemoveFromQueue(client, true);
+
+        // Removal was blocked by another plugin: stay where we are instead of leaving a ghost behind
+        if (g_iPlayerArena[client])
+            return;
     }
     
     // Call OnPlayerArenaAdd forward - allow blocking

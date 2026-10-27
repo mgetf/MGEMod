@@ -14,6 +14,14 @@ void Rating_ReportResult(int winner1, int winner2, int loser1, int loser2)
     if (g_bNoStats || g_bSuppressEloUpdates)
         return;
 
+    // A client can never be on both sides of a result (self-duel would farm rating)
+    if (winner1 == loser1 || (winner2 > 0 && (winner2 == loser1 || winner2 == loser2))
+        || (loser2 > 0 && winner1 == loser2))
+    {
+        LogError("Refusing rating update: same client on both sides (w %d/%d, l %d/%d)", winner1, winner2, loser1, loser2);
+        return;
+    }
+
     bool is2v2 = (winner2 > 0 && loser2 > 0);
 
     switch (g_eRatingEngine)

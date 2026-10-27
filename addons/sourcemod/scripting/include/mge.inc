@@ -106,7 +106,8 @@ forward Action MGE_OnPlayerArenaAdd(int client, int arena_index, int slot);
 forward void MGE_OnPlayerArenaAdded(int client, int arena_index, int slot);
 
 /**
- * Called before a player is removed from an arena - can be blocked
+ * Called before a player is removed from an arena - can be blocked.
+ * Blocking is ignored when the player is disconnecting; the slot is always freed then.
  *
  * @param client         Client index
  * @param arena_index    Arena index
