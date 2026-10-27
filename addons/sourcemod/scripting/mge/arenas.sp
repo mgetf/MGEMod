@@ -788,6 +788,13 @@ void DropQueueSlot(int arena_index, int slot)
     UpdateHudForArena(arena_index);
 }
 
+// Undo AddInQueue's same-arena slot release when the add doesn't go through
+void RestoreReleasedSlot(int client, int arena_index, int released_slot)
+{
+    if (released_slot && !g_iArenaQueue[arena_index][released_slot])
+        g_iArenaQueue[arena_index][released_slot] = client;
+}
+
 bool CanPlayerJoinArena(int client, int arena_index, bool showmsg)
 {
     if (IsFakeClient(client)
@@ -840,6 +847,9 @@ void AddInQueue(int client, int arena_index, bool showmsg = true, int playerPref
     // Never let a leftover entry make this client sit in two slots at once
     PurgeStaleQueueEntries(client);
 
+    // Slot freed below for a re-slot in the same arena; put back if the add is aborted
+    int released_slot = 0;
+
     // Handle case where player is already in an arena
     if (g_iPlayerArena[client])
     {
@@ -859,7 +869,8 @@ void AddInQueue(int client, int arena_index, bool showmsg = true, int playerPref
             // Intentional action (team switch / re-slot) within same arena: clear old slot now
             if (g_iPlayerSlot[client] != 0)
             {
-                g_iArenaQueue[g_iPlayerArena[client]][g_iPlayerSlot[client]] = 0;
+                released_slot = g_iPlayerSlot[client];
+                g_iArenaQueue[arena_index][released_slot] = 0;
             }
         }
     }
@@ -898,14 +909,16 @@ void AddInQueue(int client, int arena_index, bool showmsg = true, int playerPref
                 else
                     MC_PrintToChat(client, "[MGE] Invalid slot %d for 1v1 arena (valid slots: 1-2)", forcedSlot);
             }
+            RestoreReleasedSlot(client, arena_index, released_slot);
             return;
         }
-        
+
         // Check if forced slot is already occupied
         if (g_iArenaQueue[arena_index][forcedSlot] != 0)
         {
             if (showmsg)
                 MC_PrintToChat(client, "[MGE] Slot %d is already occupied", forcedSlot);
+            RestoreReleasedSlot(client, arena_index, released_slot);
             return;
         }
         
@@ -967,8 +980,12 @@ void AddInQueue(int client, int arena_index, bool showmsg = true, int playerPref
     // Call OnPlayerArenaAdd forward - allow blocking
     Action result = CallForward_OnPlayerArenaAdd(client, arena_index, player_slot);
     if (result >= Plugin_Handled)
+    {
+        // A blocked re-slot must not leave the player half-removed from their own arena
+        RestoreReleasedSlot(client, arena_index, released_slot);
         return;
-    
+    }
+
     g_iPlayerArena[client] = arena_index;
     g_iPlayerSlot[client] = player_slot;
     g_iArenaQueue[arena_index][player_slot] = client;
