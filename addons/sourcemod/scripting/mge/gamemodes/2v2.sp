@@ -192,38 +192,75 @@ int Menu_2v2Selection(Menu menu, MenuAction action, int param1, int param2)
 
 // ===== READY SYSTEM MANAGEMENT =====
 
-// Initializes the 2v2 ready system when all 4 players have joined an arena
+// Slots that take part in the ready check: 4 in 2v2, 2 in 1v1 (slots 3+ of a 1v1 arena are the waiting line)
+int GetReadyMaxSlot(int arena_index)
+{
+    return g_bFourPersonArena[arena_index] ? SLOT_FOUR : SLOT_TWO;
+}
+
+// Prints a translated chat phrase to the players taking part in the ready check only
+void PrintToReadyPlayers(int arena_index, const char[] phrase)
+{
+    int max_slot = GetReadyMaxSlot(arena_index);
+    for (int i = SLOT_ONE; i <= max_slot; i++)
+    {
+        int client = g_iArenaQueue[arena_index][i];
+        if (client && IsValidClient(client))
+        {
+            MC_PrintToChat(client, "%t", phrase);
+        }
+    }
+}
+
+// Initializes the ready system: in 2v2 once all 4 players have joined an arena,
+// in 1v1 (mgemod_1v1_ready) once both duelists are in the arena
 void Start2v2ReadySystem(int arena_index)
 {
-    // Reset all players' ready status
-    for (int i = SLOT_ONE; i <= SLOT_FOUR; i++)
+    int max_slot = GetReadyMaxSlot(arena_index);
+    bool is_2v2 = g_bFourPersonArena[arena_index];
+
+    // Reset all players' ready status (bots can't type !ready, so they are always ready in 1v1)
+    for (int i = SLOT_ONE; i <= max_slot; i++)
     {
         int client = g_iArenaQueue[arena_index][i];
         if (client)
         {
-            g_bPlayer2v2Ready[client] = false;
+            g_bPlayer2v2Ready[client] = (!is_2v2 && IsFakeClient(client));
         }
+    }
+
+    // 1v1: the previous duel's score is still on the HUD, clear it while players pick their class
+    if (!is_2v2)
+    {
+        ResetArenaScores(arena_index);
+        UpdateHudForArena(arena_index);
     }
 
     // Set arena status to waiting for ready
     SetArenaStatus(arena_index, AS_WAITING_READY);
 
-    // Call 2v2 ready start forward
-    CallForward_On2v2ReadyStart(arena_index);
+    // Call 2v2 ready start forward (the 2v2 forwards are not fired for 1v1 arenas)
+    if (is_2v2)
+    {
+        CallForward_On2v2ReadyStart(arena_index);
+    }
 
     // Reset all players and show ready menu
-    for (int i = SLOT_ONE; i <= SLOT_FOUR; i++)
+    for (int i = SLOT_ONE; i <= max_slot; i++)
     {
         int client = g_iArenaQueue[arena_index][i];
         if (client)
         {
             CreateTimer(0.1, Timer_ResetPlayer, GetClientUserId(client));
-            CreateTimer(0.5, Timer_ShowReadyMenu, GetClientUserId(client));
+            if (!IsFakeClient(client))
+            {
+                CreateTimer(0.5, Timer_ShowReadyMenu, GetClientUserId(client));
+            }
         }
     }
 
     // Notify players about ready state
-    PrintToChatArena(arena_index, "%t", "All4PlayersJoined");
+    PrintToReadyPlayers(arena_index, is_2v2 ? "All4PlayersJoined" : "Ready1v1Prompt");
     
     // Delay hint text by 1 second after arena selection
     CreateTimer(1.0, Timer_Show2v2InitialStatus, arena_index);
@@ -239,13 +276,13 @@ void Show2v2ReadyMenu(int client)
         return;
 
     int arena_index = g_iPlayerArena[client];
-    if (!arena_index || !g_bFourPersonArena[arena_index] || g_iArenaStatus[arena_index] != AS_WAITING_READY)
+    if (!arena_index || g_iArenaStatus[arena_index] != AS_WAITING_READY)
         return;
 
     char title[128];
     Menu menu = new Menu(Menu_2v2Ready);
 
-    Format(title, sizeof(title), "%T", "Ready2v2MatchTitle", client);
+    Format(title, sizeof(title), "%T", g_bFourPersonArena[arena_index] ? "Ready2v2MatchTitle" : "Ready1v1MatchTitle", client);
     menu.SetTitle(title);
 
     char yes_text[64], no_text[64];
@@ -270,14 +307,17 @@ int Menu_2v2Ready(Menu menu, MenuAction action, int param1, int param2)
             menu.GetItem(param2, info, sizeof(info));
             
             int arena_index = g_iPlayerArena[client];
-            if (!arena_index || !g_bFourPersonArena[arena_index] || g_iArenaStatus[arena_index] != AS_WAITING_READY)
+            if (!arena_index || g_iArenaStatus[arena_index] != AS_WAITING_READY)
                 return 0;
 
             bool ready = StringToInt(info) == 1;
             g_bPlayer2v2Ready[client] = ready;
 
             // Call 2v2 player ready forward
-            CallForward_On2v2PlayerReady(client, arena_index, ready);
+            if (g_bFourPersonArena[arena_index])
+            {
+                CallForward_On2v2PlayerReady(client, arena_index, ready);
+            }
 
             Update2v2ReadyStatus(arena_index);
         }
@@ -290,13 +330,14 @@ int Menu_2v2Ready(Menu menu, MenuAction action, int param1, int param2)
     return 0;
 }
 
-// Updates and checks the ready status of all players in a 2v2 arena
+// Updates and checks the ready status of all players in a ready-check arena (2v2, or 1v1 with mgemod_1v1_ready)
 void Update2v2ReadyStatus(int arena_index)
 {
+    int max_slot = GetReadyMaxSlot(arena_index);
     int ready_count = 0;
     int total_players = 0;
     
-    for (int i = SLOT_ONE; i <= SLOT_FOUR; i++)
+    for (int i = SLOT_ONE; i <= max_slot; i++)
     {
         int client = g_iArenaQueue[arena_index][i];
         if (client)
@@ -308,14 +349,16 @@ void Update2v2ReadyStatus(int arena_index)
     }
 
     // Show progress to all players in arena
-    if (total_players == 4)
+    if (total_players == max_slot)
     {
         Show2v2ReadyHud(arena_index, ready_count);
         
-        if (ready_count == 4 && g_iArenaStatus[arena_index] == AS_WAITING_READY)
+        if (ready_count == max_slot && g_iArenaStatus[arena_index] == AS_WAITING_READY)
         {
             SetArenaStatus(arena_index, AS_PRECOUNTDOWN);
-            PrintToChatArena(arena_index, "%t", "AllPlayersReady");
+            // Tells Timer_StartDuel this 1v1 duel has been confirmed and must not ask for ready again
+            g_bArenaReadyDone[arena_index] = true;
+            PrintToReadyPlayers(arena_index, "AllPlayersReady");
             CreateTimer(1.5, Timer_StartDuel, arena_index);
         }
     }
@@ -327,8 +370,10 @@ void Update2v2ReadyStatus(int arena_index)
 // Shows personalized ready status HUD text to each player in the arena
 void Show2v2ReadyHud(int arena_index, int ready_count)
 {
+    int max_slot = GetReadyMaxSlot(arena_index);
+
     // Show personalized HUD text to each player
-    for (int i = SLOT_ONE; i <= SLOT_FOUR; i++)
+    for (int i = SLOT_ONE; i <= max_slot; i++)
     {
         int client = g_iArenaQueue[arena_index][i];
         if (client && IsValidClient(client))
@@ -347,7 +392,7 @@ void Show2v2ReadyHud(int arena_index, int ready_count)
             }
             
             // Format personalized hud text
-            Format(hudtext, sizeof(hudtext), "%T", "Ready2v2HudText", client, ready_count, status_indicator);
+            Format(hudtext, sizeof(hudtext), "%T", g_bFourPersonArena[arena_index] ? "Ready2v2HudText" : "Ready1v1HudText", client, ready_count, status_indicator);
             
             PrintHintText(client, "%s", hudtext);
             StopSound(client, SNDCHAN_STATIC, "UI/hint.wav");
@@ -696,7 +741,8 @@ Action Command_Ready(int client, int args)
         return Plugin_Handled;
     }
 
-    if (!g_bFourPersonArena[arena_index])
+    // 1v1 arenas only use !ready when mgemod_1v1_ready is on (or while one is already waiting for it)
+    if (!g_bFourPersonArena[arena_index] && !g_b1v1Ready && g_iArenaStatus[arena_index] != AS_WAITING_READY)
     {
         MC_PrintToChat(client, "%t", "ReadyOnlyFor2v2");
         return Plugin_Handled;
@@ -715,7 +761,10 @@ Action Command_Ready(int client, int args)
     g_bPlayer2v2Ready[client] = !g_bPlayer2v2Ready[client];
 
     // Call 2v2 player ready forward  
-    CallForward_On2v2PlayerReady(client, arena_index, g_bPlayer2v2Ready[client]);
+    if (g_bFourPersonArena[arena_index])
+    {
+        CallForward_On2v2PlayerReady(client, arena_index, g_bPlayer2v2Ready[client]);
+    }
 
     Update2v2ReadyStatus(arena_index);
     return Plugin_Handled;
@@ -768,10 +817,11 @@ Action Timer_Refresh2v2Hud(Handle timer, any arena_index)
     // Only refresh if arena is still in ready state
     if (g_iArenaStatus[arena_index] == AS_WAITING_READY)
     {
+        int max_slot = GetReadyMaxSlot(arena_index);
         int ready_count = 0;
         int valid_players = 0;
         
-        for (int i = SLOT_ONE; i <= SLOT_FOUR; i++)
+        for (int i = SLOT_ONE; i <= max_slot; i++)
         {
             int client = g_iArenaQueue[arena_index][i];
             if (client && IsValidClient(client))
@@ -782,7 +832,7 @@ Action Timer_Refresh2v2Hud(Handle timer, any arena_index)
             }
         }
         
-        if (valid_players == 4)
+        if (valid_players == max_slot)
         {
             Show2v2ReadyHud(arena_index, ready_count);
         }

@@ -93,7 +93,8 @@ bool g_bBlockFallDamage,
      g_bAutoCvar,
      g_b2v2SkipCountdown,
      g_b2v2Elo,
-     g_bClearProjectiles;
+     g_bClearProjectiles,
+     g_b1v1Ready;
 
 int
     g_iDefaultFragLimit,
@@ -127,6 +128,7 @@ Convar
     gcvar_2v2SkipCountdown,
     gcvar_2v2Elo,
     gcvar_clearProjectiles,
+    gcvar_1v1Ready,
     gcvar_ratingEngine,
     gcvar_glickoTau,
     gcvar_glickoPeriodDays,
@@ -298,7 +300,8 @@ int g_iPendingArena[MAXPLAYERS + 1];
 TFClassType g_tfctPlayerClass[MAXPLAYERS + 1];
 
 // 2v2 System Variables
-bool g_bPlayer2v2Ready[MAXPLAYERS + 1];  // Player ready status for 2v2 matches
+bool g_bPlayer2v2Ready[MAXPLAYERS + 1];  // Player ready status (2v2 matches, and 1v1 when mgemod_1v1_ready is on)
+bool g_bArenaReadyDone[MAXARENAS + 1];   // 1v1 only: both players confirmed ready, let the next Timer_StartDuel start the countdown
 
 // Class tracking for duels
 TFClassType g_tfctPlayerDuelClass[MAXPLAYERS + 1];
