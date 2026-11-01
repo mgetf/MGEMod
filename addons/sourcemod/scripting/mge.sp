@@ -116,6 +116,7 @@ public void OnPluginStart()
     gcvar_2v2SkipCountdown = new Convar("mgemod_2v2_skip_countdown", "0", "Skip countdown between 2v2 rounds? (0 = Normal countdown, 1 = Skip countdown)", FCVAR_NONE, true, 0.0, true, 1.0);
     gcvar_2v2Elo = new Convar("mgemod_2v2_elo", "1", "Enable ELO calculation and display for 2v2 matches? (0 = Disabled, 1 = Enabled)", FCVAR_NONE, true, 0.0, true, 1.0);
     gcvar_clearProjectiles = new Convar("mgemod_clear_projectiles", "0", "Clear projectiles when a new round starts? (0 = Disabled, 1 = Enabled)", FCVAR_NONE, true, 0.0, true, 1.0);
+    gcvar_1v1Ready = new Convar("mgemod_1v1_ready", "0", "Require both players to ready up (!ready / !r) before every 1v1 duel starts, like in 2v2? (0 = Disabled, 1 = Enabled)", FCVAR_NONE, true, 0.0, true, 1.0);
     gcvar_ratingEngine = new Convar("mgemod_rating_engine", "elo", "Rating engine used to score duels: \"elo\" (default) or \"glicko2\" (opt-in). One engine active server-wide, no dual leaderboard.");
     gcvar_glickoTau = new Convar("mgemod_glicko_tau", "0.5", "Glicko-2 system constant controlling how fast volatility reacts to surprising results. Only used when mgemod_rating_engine is \"glicko2\".", FCVAR_NONE, true, 0.2, true, 1.2);
     gcvar_glickoPeriodDays = new Convar("mgemod_glicko_period_days", "1.0", "Number of days considered one Glicko-2 rating period for RD inflation due to inactivity. Only used when mgemod_rating_engine is \"glicko2\".", FCVAR_NONE, true, 0.1);
@@ -143,6 +144,7 @@ public void OnPluginStart()
     g_b2v2SkipCountdown = gcvar_2v2SkipCountdown.IntValue ? true : false;
     g_b2v2Elo = gcvar_2v2Elo.IntValue ? true : false;
     g_bClearProjectiles = gcvar_clearProjectiles.IntValue ? true : false;
+    g_b1v1Ready = gcvar_1v1Ready.IntValue ? true : false;
     g_fGlickoTau = gcvar_glickoTau.FloatValue;
     g_fGlickoPeriodDays = gcvar_glickoPeriodDays.FloatValue;
     g_fGlickoProvisionalRd = gcvar_glickoProvisionalRd.FloatValue;
@@ -198,6 +200,7 @@ public void OnPluginStart()
     gcvar_2v2SkipCountdown.AddChangeHook(handler_ConVarChange);
     gcvar_2v2Elo.AddChangeHook(handler_ConVarChange);
     gcvar_clearProjectiles.AddChangeHook(handler_ConVarChange);
+    gcvar_1v1Ready.AddChangeHook(handler_ConVarChange);
     gcvar_ratingEngine.AddChangeHook(handler_ConVarChange);
     gcvar_glickoTau.AddChangeHook(handler_ConVarChange);
     gcvar_glickoPeriodDays.AddChangeHook(handler_ConVarChange);
@@ -241,8 +244,8 @@ public void OnPluginStart()
     RegAdminCmd("conntest", Command_ConnectionTest, ADMFLAG_BAN, "MySQL connection test");
     
     // 2v2 Ready System Commands
-    RegConsoleCmd("ready", Command_Ready, "Mark yourself as ready for 2v2 match");
-    RegConsoleCmd("r", Command_Ready, "Mark yourself as ready for 2v2 match");
+    RegConsoleCmd("ready", Command_Ready, "Mark yourself as ready for a 2v2 match (or a 1v1 duel when mgemod_1v1_ready is 1)");
+    RegConsoleCmd("r", Command_Ready, "Mark yourself as ready for a 2v2 match (or a 1v1 duel when mgemod_1v1_ready is 1)");
     
     AddCommandListener(Command_DropItem, "dropitem");
     AddCommandListener(Command_SpecNavigation, "spec_next");
@@ -657,6 +660,8 @@ void handler_ConVarChange(Handle convar, const char[] oldValue, const char[] new
         g_b2v2Elo = boolValue;
     else if (convar == gcvar_clearProjectiles)
         g_bClearProjectiles = boolValue;
+    else if (convar == gcvar_1v1Ready)
+        g_b1v1Ready = boolValue;
     else if (convar == gcvar_ratingEngine)
     {
         g_eRatingEngine = StrEqual(newValue, "glicko2", false) ? RATING_ENGINE_GLICKO2 : RATING_ENGINE_ELO;

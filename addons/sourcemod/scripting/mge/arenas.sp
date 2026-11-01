@@ -705,6 +705,7 @@ void ResetAllArenaQueues()
             g_iArenaQueue[arena_index][slot] = 0;
 
         g_iArenaStatus[arena_index] = AS_IDLE;
+        g_bArenaReadyDone[arena_index] = false;
         g_iArenaScore[arena_index][SLOT_ONE] = 0;
         g_iArenaScore[arena_index][SLOT_TWO] = 0;
     }
@@ -2045,6 +2046,19 @@ Action Timer_CountDown(Handle timer, any arena_index)
 // Initialize duel start sequence and player setup
 Action Timer_StartDuel(Handle timer, any arena_index)
 {
+    // mgemod_1v1_ready: hold every 1v1 duel (first join, rematch, queue rotation) until both players
+    // have picked their class and typed !ready. Update2v2ReadyStatus sets g_bArenaReadyDone and calls
+    // this timer again once they are, which lets the countdown start. Skipped while a countdown is
+    // already running so a late duplicate timer cannot interrupt it.
+    if (g_b1v1Ready && !g_bFourPersonArena[arena_index] && !g_bArenaReadyDone[arena_index]
+        && g_iArenaQueue[arena_index][SLOT_ONE] && g_iArenaQueue[arena_index][SLOT_TWO]
+        && g_iArenaStatus[arena_index] != AS_PRECOUNTDOWN && g_iArenaStatus[arena_index] != AS_COUNTDOWN)
+    {
+        Start2v2ReadySystem(arena_index);
+        return Plugin_Stop;
+    }
+    g_bArenaReadyDone[arena_index] = false;
+
     ResetArena(arena_index);
 
     if (g_bArenaTurris[arena_index])

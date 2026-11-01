@@ -12,6 +12,7 @@ This is a fork of sappho's repository, with the following improvements:
 ## New ConVars
 
 * `mgemod_clear_projectiles` (0/1) - allow server owners to enable/disable projectile deletion upon the start of a new round
+* `mgemod_1v1_ready` (0/1, default 0) - require both players to ready up (`!ready` / `!r` or the ready menu) before every 1v1 duel starts, using the same ready system as 2v2. It applies to the first duel in an arena, rematches and queue rotation, so players can pick their class before the countdown instead of switching mid-duel. Bots count as ready. Default `0` keeps the previous behavior.
 * `mgemod_rating_engine` (`elo`/`glicko2`) - selects the rating engine used to score every duel. Defaults to `elo`, which is the exact same math as before this convar existed. See [Rating Engines](#rating-engines) below.
 * `mgemod_glicko_tau` (float) - Glicko-2 system constant controlling how fast volatility can change. Only used when `mgemod_rating_engine` is `glicko2`.
 * `mgemod_glicko_period_hours` (int, default 24, range 1-168) - wall-clock length of one Glicko-2 rating period. 12 seals twice a day; 48 seals every other day. Only used when `mgemod_rating_engine` is `glicko2`.

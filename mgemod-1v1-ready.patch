@@ -1,0 +1,403 @@
+diff -ruN a/AGENTS.md b/AGENTS.md
+--- a/AGENTS.md	2026-10-31 00:27:58.255751581 +0000
++++ b/AGENTS.md	2026-10-31 00:27:58.260081984 +0000
+@@ -72,7 +72,7 @@
+ | **Gamemode** | Per-arena mode: `mge`, `bball`, `koth`, `ammomod`, `midair`, `endif`, `ultiduo`, `turris`. Stored as bitmask flags. |
+ | **Slot** | Player position in an arena (1–4). Slots 1–2 for 1v1, slots 1–4 for 2v2. |
+ | **Queue** | Players join arenas via `!add` or menu. Losers rotate out when queue has waiting players. |
+-| **Arena Status** | State machine: `IDLE → PRECOUNTDOWN → COUNTDOWN → FIGHT → AFTERFIGHT → REPORTED`. Also `WAITING_READY` for 2v2. |
++| **Arena Status** | State machine: `IDLE → PRECOUNTDOWN → COUNTDOWN → FIGHT → AFTERFIGHT → REPORTED`. Also `WAITING_READY` for 2v2, and for 1v1 when `mgemod_1v1_ready` is 1 (see `Timer_StartDuel`). |
+ | **ELO** | Persistent rating stored in DB. Optional — plugin works without a database. |
+ | **Rating Engine** | Pluggable algorithm behind ELO: `elo` (default, live K-factor) or `glicko2` (opt-in). Glicko-2 seals `rating`/`rd`/`volatility` on a wall-clock period. HUD may show `~` from `rating_est`. See `mge/rating/` and [docs/glicko2-24h-period-walkthrough.md](docs/glicko2-24h-period-walkthrough.md). |
+ | **Frag Limit** | Score target to win a match. Configurable per-arena. |
+diff -ruN a/README.md b/README.md
+--- a/README.md	2026-10-31 00:27:58.255786598 +0000
++++ b/README.md	2026-10-31 00:27:58.260118098 +0000
+@@ -12,6 +12,7 @@
+ ## New ConVars
+ 
+ * `mgemod_clear_projectiles` (0/1) - allow server owners to enable/disable projectile deletion upon the start of a new round
++* `mgemod_1v1_ready` (0/1, default 0) - require both players to ready up (`!ready` / `!r` or the ready menu) before every 1v1 duel starts, using the same ready system as 2v2. It applies to the first duel in an arena, rematches and queue rotation, so players can pick their class before the countdown instead of switching mid-duel. Bots count as ready. Default `0` keeps the previous behavior.
+ * `mgemod_rating_engine` (`elo`/`glicko2`) - selects the rating engine used to score every duel. Defaults to `elo`, which is the exact same math as before this convar existed. See [Rating Engines](#rating-engines) below.
+ * `mgemod_glicko_tau` (float) - Glicko-2 system constant controlling how fast volatility can change. Only used when `mgemod_rating_engine` is `glicko2`.
+ * `mgemod_glicko_period_hours` (int, default 24, range 1-168) - wall-clock length of one Glicko-2 rating period. 12 seals twice a day; 48 seals every other day. Only used when `mgemod_rating_engine` is `glicko2`.
+diff -ruN a/addons/sourcemod/scripting/mge/arenas.sp b/addons/sourcemod/scripting/mge/arenas.sp
+--- a/addons/sourcemod/scripting/mge/arenas.sp	2026-10-31 00:27:58.257709420 +0000
++++ b/addons/sourcemod/scripting/mge/arenas.sp	2026-10-31 00:27:58.261884921 +0000
+@@ -705,6 +705,7 @@
+             g_iArenaQueue[arena_index][slot] = 0;
+ 
+         g_iArenaStatus[arena_index] = AS_IDLE;
++        g_bArenaReadyDone[arena_index] = false;
+         g_iArenaScore[arena_index][SLOT_ONE] = 0;
+         g_iArenaScore[arena_index][SLOT_TWO] = 0;
+     }
+@@ -2045,6 +2046,19 @@
+ // Initialize duel start sequence and player setup
+ Action Timer_StartDuel(Handle timer, any arena_index)
+ {
++    // mgemod_1v1_ready: hold every 1v1 duel (first join, rematch, queue rotation) until both players
++    // have picked their class and typed !ready. Update2v2ReadyStatus sets g_bArenaReadyDone and calls
++    // this timer again once they are, which lets the countdown start. Skipped while a countdown is
++    // already running so a late duplicate timer cannot interrupt it.
++    if (g_b1v1Ready && !g_bFourPersonArena[arena_index] && !g_bArenaReadyDone[arena_index]
++        && g_iArenaQueue[arena_index][SLOT_ONE] && g_iArenaQueue[arena_index][SLOT_TWO]
++        && g_iArenaStatus[arena_index] != AS_PRECOUNTDOWN && g_iArenaStatus[arena_index] != AS_COUNTDOWN)
++    {
++        Start2v2ReadySystem(arena_index);
++        return Plugin_Stop;
++    }
++    g_bArenaReadyDone[arena_index] = false;
++
+     ResetArena(arena_index);
+ 
+     if (g_bArenaTurris[arena_index])
+diff -ruN a/addons/sourcemod/scripting/mge/gamemodes/2v2.sp b/addons/sourcemod/scripting/mge/gamemodes/2v2.sp
+--- a/addons/sourcemod/scripting/mge/gamemodes/2v2.sp	2026-10-31 00:27:58.257755341 +0000
++++ b/addons/sourcemod/scripting/mge/gamemodes/2v2.sp	2026-10-31 00:27:58.261965548 +0000
+@@ -192,38 +192,75 @@
+ 
+ // ===== READY SYSTEM MANAGEMENT =====
+ 
+-// Initializes the 2v2 ready system when all 4 players have joined an arena
++// Slots that take part in the ready check: 4 in 2v2, 2 in 1v1 (slots 3+ of a 1v1 arena are the waiting line)
++int GetReadyMaxSlot(int arena_index)
++{
++    return g_bFourPersonArena[arena_index] ? SLOT_FOUR : SLOT_TWO;
++}
++
++// Prints a translated chat phrase to the players taking part in the ready check only
++void PrintToReadyPlayers(int arena_index, const char[] phrase)
++{
++    int max_slot = GetReadyMaxSlot(arena_index);
++    for (int i = SLOT_ONE; i <= max_slot; i++)
++    {
++        int client = g_iArenaQueue[arena_index][i];
++        if (client && IsValidClient(client))
++        {
++            MC_PrintToChat(client, "%t", phrase);
++        }
++    }
++}
++
++// Initializes the ready system: in 2v2 once all 4 players have joined an arena,
++// in 1v1 (mgemod_1v1_ready) once both duelists are in the arena
+ void Start2v2ReadySystem(int arena_index)
+ {
+-    // Reset all players' ready status
+-    for (int i = SLOT_ONE; i <= SLOT_FOUR; i++)
++    int max_slot = GetReadyMaxSlot(arena_index);
++    bool is_2v2 = g_bFourPersonArena[arena_index];
++
++    // Reset all players' ready status (bots can't type !ready, so they are always ready in 1v1)
++    for (int i = SLOT_ONE; i <= max_slot; i++)
+     {
+         int client = g_iArenaQueue[arena_index][i];
+         if (client)
+         {
+-            g_bPlayer2v2Ready[client] = false;
++            g_bPlayer2v2Ready[client] = (!is_2v2 && IsFakeClient(client));
+         }
+     }
+ 
++    // 1v1: the previous duel's score is still on the HUD, clear it while players pick their class
++    if (!is_2v2)
++    {
++        ResetArenaScores(arena_index);
++        UpdateHudForArena(arena_index);
++    }
++
+     // Set arena status to waiting for ready
+     SetArenaStatus(arena_index, AS_WAITING_READY);
+ 
+-    // Call 2v2 ready start forward
+-    CallForward_On2v2ReadyStart(arena_index);
++    // Call 2v2 ready start forward (the 2v2 forwards are not fired for 1v1 arenas)
++    if (is_2v2)
++    {
++        CallForward_On2v2ReadyStart(arena_index);
++    }
+ 
+     // Reset all players and show ready menu
+-    for (int i = SLOT_ONE; i <= SLOT_FOUR; i++)
++    for (int i = SLOT_ONE; i <= max_slot; i++)
+     {
+         int client = g_iArenaQueue[arena_index][i];
+         if (client)
+         {
+             CreateTimer(0.1, Timer_ResetPlayer, GetClientUserId(client));
+-            CreateTimer(0.5, Timer_ShowReadyMenu, GetClientUserId(client));
++            if (!IsFakeClient(client))
++            {
++                CreateTimer(0.5, Timer_ShowReadyMenu, GetClientUserId(client));
++            }
+         }
+     }
+ 
+     // Notify players about ready state
+-    PrintToChatArena(arena_index, "%t", "All4PlayersJoined");
++    PrintToReadyPlayers(arena_index, is_2v2 ? "All4PlayersJoined" : "Ready1v1Prompt");
+     
+     // Delay hint text by 1 second after arena selection
+     CreateTimer(1.0, Timer_Show2v2InitialStatus, arena_index);
+@@ -239,13 +276,13 @@
+         return;
+ 
+     int arena_index = g_iPlayerArena[client];
+-    if (!arena_index || !g_bFourPersonArena[arena_index] || g_iArenaStatus[arena_index] != AS_WAITING_READY)
++    if (!arena_index || g_iArenaStatus[arena_index] != AS_WAITING_READY)
+         return;
+ 
+     char title[128];
+     Menu menu = new Menu(Menu_2v2Ready);
+ 
+-    Format(title, sizeof(title), "%T", "Ready2v2MatchTitle", client);
++    Format(title, sizeof(title), "%T", g_bFourPersonArena[arena_index] ? "Ready2v2MatchTitle" : "Ready1v1MatchTitle", client);
+     menu.SetTitle(title);
+ 
+     char yes_text[64], no_text[64];
+@@ -270,14 +307,17 @@
+             menu.GetItem(param2, info, sizeof(info));
+             
+             int arena_index = g_iPlayerArena[client];
+-            if (!arena_index || !g_bFourPersonArena[arena_index] || g_iArenaStatus[arena_index] != AS_WAITING_READY)
++            if (!arena_index || g_iArenaStatus[arena_index] != AS_WAITING_READY)
+                 return 0;
+ 
+             bool ready = StringToInt(info) == 1;
+             g_bPlayer2v2Ready[client] = ready;
+ 
+             // Call 2v2 player ready forward
+-            CallForward_On2v2PlayerReady(client, arena_index, ready);
++            if (g_bFourPersonArena[arena_index])
++            {
++                CallForward_On2v2PlayerReady(client, arena_index, ready);
++            }
+ 
+             Update2v2ReadyStatus(arena_index);
+         }
+@@ -290,13 +330,14 @@
+     return 0;
+ }
+ 
+-// Updates and checks the ready status of all players in a 2v2 arena
++// Updates and checks the ready status of all players in a ready-check arena (2v2, or 1v1 with mgemod_1v1_ready)
+ void Update2v2ReadyStatus(int arena_index)
+ {
++    int max_slot = GetReadyMaxSlot(arena_index);
+     int ready_count = 0;
+     int total_players = 0;
+     
+-    for (int i = SLOT_ONE; i <= SLOT_FOUR; i++)
++    for (int i = SLOT_ONE; i <= max_slot; i++)
+     {
+         int client = g_iArenaQueue[arena_index][i];
+         if (client)
+@@ -308,14 +349,16 @@
+     }
+ 
+     // Show progress to all players in arena
+-    if (total_players == 4)
++    if (total_players == max_slot)
+     {
+         Show2v2ReadyHud(arena_index, ready_count);
+         
+-        if (ready_count == 4 && g_iArenaStatus[arena_index] == AS_WAITING_READY)
++        if (ready_count == max_slot && g_iArenaStatus[arena_index] == AS_WAITING_READY)
+         {
+             SetArenaStatus(arena_index, AS_PRECOUNTDOWN);
+-            PrintToChatArena(arena_index, "%t", "AllPlayersReady");
++            // Tells Timer_StartDuel this 1v1 duel has been confirmed and must not ask for ready again
++            g_bArenaReadyDone[arena_index] = true;
++            PrintToReadyPlayers(arena_index, "AllPlayersReady");
+             CreateTimer(1.5, Timer_StartDuel, arena_index);
+         }
+     }
+@@ -327,8 +370,10 @@
+ // Shows personalized ready status HUD text to each player in the arena
+ void Show2v2ReadyHud(int arena_index, int ready_count)
+ {
++    int max_slot = GetReadyMaxSlot(arena_index);
++
+     // Show personalized HUD text to each player
+-    for (int i = SLOT_ONE; i <= SLOT_FOUR; i++)
++    for (int i = SLOT_ONE; i <= max_slot; i++)
+     {
+         int client = g_iArenaQueue[arena_index][i];
+         if (client && IsValidClient(client))
+@@ -347,7 +392,7 @@
+             }
+             
+             // Format personalized hud text
+-            Format(hudtext, sizeof(hudtext), "%T", "Ready2v2HudText", client, ready_count, status_indicator);
++            Format(hudtext, sizeof(hudtext), "%T", g_bFourPersonArena[arena_index] ? "Ready2v2HudText" : "Ready1v1HudText", client, ready_count, status_indicator);
+             
+             PrintHintText(client, "%s", hudtext);
+             StopSound(client, SNDCHAN_STATIC, "UI/hint.wav");
+@@ -696,7 +741,8 @@
+         return Plugin_Handled;
+     }
+ 
+-    if (!g_bFourPersonArena[arena_index])
++    // 1v1 arenas only use !ready when mgemod_1v1_ready is on (or while one is already waiting for it)
++    if (!g_bFourPersonArena[arena_index] && !g_b1v1Ready && g_iArenaStatus[arena_index] != AS_WAITING_READY)
+     {
+         MC_PrintToChat(client, "%t", "ReadyOnlyFor2v2");
+         return Plugin_Handled;
+@@ -715,7 +761,10 @@
+     g_bPlayer2v2Ready[client] = !g_bPlayer2v2Ready[client];
+ 
+     // Call 2v2 player ready forward  
+-    CallForward_On2v2PlayerReady(client, arena_index, g_bPlayer2v2Ready[client]);
++    if (g_bFourPersonArena[arena_index])
++    {
++        CallForward_On2v2PlayerReady(client, arena_index, g_bPlayer2v2Ready[client]);
++    }
+ 
+     Update2v2ReadyStatus(arena_index);
+     return Plugin_Handled;
+@@ -768,10 +817,11 @@
+     // Only refresh if arena is still in ready state
+     if (g_iArenaStatus[arena_index] == AS_WAITING_READY)
+     {
++        int max_slot = GetReadyMaxSlot(arena_index);
+         int ready_count = 0;
+         int valid_players = 0;
+         
+-        for (int i = SLOT_ONE; i <= SLOT_FOUR; i++)
++        for (int i = SLOT_ONE; i <= max_slot; i++)
+         {
+             int client = g_iArenaQueue[arena_index][i];
+             if (client && IsValidClient(client))
+@@ -782,7 +832,7 @@
+             }
+         }
+         
+-        if (valid_players == 4)
++        if (valid_players == max_slot)
+         {
+             Show2v2ReadyHud(arena_index, ready_count);
+         }
+diff -ruN a/addons/sourcemod/scripting/mge/globals.sp b/addons/sourcemod/scripting/mge/globals.sp
+--- a/addons/sourcemod/scripting/mge/globals.sp	2026-10-31 00:27:58.257853951 +0000
++++ b/addons/sourcemod/scripting/mge/globals.sp	2026-10-31 00:27:58.262095774 +0000
+@@ -93,7 +93,8 @@
+      g_bAutoCvar,
+      g_b2v2SkipCountdown,
+      g_b2v2Elo,
+-     g_bClearProjectiles;
++     g_bClearProjectiles,
++     g_b1v1Ready;
+ 
+ int
+     g_iDefaultFragLimit,
+@@ -127,6 +128,7 @@
+     gcvar_2v2SkipCountdown,
+     gcvar_2v2Elo,
+     gcvar_clearProjectiles,
++    gcvar_1v1Ready,
+     gcvar_ratingEngine,
+     gcvar_glickoTau,
+     gcvar_glickoPeriodDays,
+@@ -298,7 +300,8 @@
+ TFClassType g_tfctPlayerClass[MAXPLAYERS + 1];
+ 
+ // 2v2 System Variables
+-bool g_bPlayer2v2Ready[MAXPLAYERS + 1];  // Player ready status for 2v2 matches
++bool g_bPlayer2v2Ready[MAXPLAYERS + 1];  // Player ready status (2v2 matches, and 1v1 when mgemod_1v1_ready is on)
++bool g_bArenaReadyDone[MAXARENAS + 1];   // 1v1 only: both players confirmed ready, let the next Timer_StartDuel start the countdown
+ 
+ // Class tracking for duels
+ TFClassType g_tfctPlayerDuelClass[MAXPLAYERS + 1];
+diff -ruN a/addons/sourcemod/scripting/mge.sp b/addons/sourcemod/scripting/mge.sp
+--- a/addons/sourcemod/scripting/mge.sp	2026-10-31 00:27:58.257574012 +0000
++++ b/addons/sourcemod/scripting/mge.sp	2026-10-31 00:27:58.261789977 +0000
+@@ -116,6 +116,7 @@
+     gcvar_2v2SkipCountdown = new Convar("mgemod_2v2_skip_countdown", "0", "Skip countdown between 2v2 rounds? (0 = Normal countdown, 1 = Skip countdown)", FCVAR_NONE, true, 0.0, true, 1.0);
+     gcvar_2v2Elo = new Convar("mgemod_2v2_elo", "1", "Enable ELO calculation and display for 2v2 matches? (0 = Disabled, 1 = Enabled)", FCVAR_NONE, true, 0.0, true, 1.0);
+     gcvar_clearProjectiles = new Convar("mgemod_clear_projectiles", "0", "Clear projectiles when a new round starts? (0 = Disabled, 1 = Enabled)", FCVAR_NONE, true, 0.0, true, 1.0);
++    gcvar_1v1Ready = new Convar("mgemod_1v1_ready", "0", "Require both players to ready up (!ready / !r) before every 1v1 duel starts, like in 2v2? (0 = Disabled, 1 = Enabled)", FCVAR_NONE, true, 0.0, true, 1.0);
+     gcvar_ratingEngine = new Convar("mgemod_rating_engine", "elo", "Rating engine used to score duels: \"elo\" (default) or \"glicko2\" (opt-in). One engine active server-wide, no dual leaderboard.");
+     gcvar_glickoTau = new Convar("mgemod_glicko_tau", "0.5", "Glicko-2 system constant controlling how fast volatility reacts to surprising results. Only used when mgemod_rating_engine is \"glicko2\".", FCVAR_NONE, true, 0.2, true, 1.2);
+     gcvar_glickoPeriodDays = new Convar("mgemod_glicko_period_days", "1.0", "Number of days considered one Glicko-2 rating period for RD inflation due to inactivity. Only used when mgemod_rating_engine is \"glicko2\".", FCVAR_NONE, true, 0.1);
+@@ -143,6 +144,7 @@
+     g_b2v2SkipCountdown = gcvar_2v2SkipCountdown.IntValue ? true : false;
+     g_b2v2Elo = gcvar_2v2Elo.IntValue ? true : false;
+     g_bClearProjectiles = gcvar_clearProjectiles.IntValue ? true : false;
++    g_b1v1Ready = gcvar_1v1Ready.IntValue ? true : false;
+     g_fGlickoTau = gcvar_glickoTau.FloatValue;
+     g_fGlickoPeriodDays = gcvar_glickoPeriodDays.FloatValue;
+     g_fGlickoProvisionalRd = gcvar_glickoProvisionalRd.FloatValue;
+@@ -198,6 +200,7 @@
+     gcvar_2v2SkipCountdown.AddChangeHook(handler_ConVarChange);
+     gcvar_2v2Elo.AddChangeHook(handler_ConVarChange);
+     gcvar_clearProjectiles.AddChangeHook(handler_ConVarChange);
++    gcvar_1v1Ready.AddChangeHook(handler_ConVarChange);
+     gcvar_ratingEngine.AddChangeHook(handler_ConVarChange);
+     gcvar_glickoTau.AddChangeHook(handler_ConVarChange);
+     gcvar_glickoPeriodDays.AddChangeHook(handler_ConVarChange);
+@@ -241,8 +244,8 @@
+     RegAdminCmd("conntest", Command_ConnectionTest, ADMFLAG_BAN, "MySQL connection test");
+     
+     // 2v2 Ready System Commands
+-    RegConsoleCmd("ready", Command_Ready, "Mark yourself as ready for 2v2 match");
+-    RegConsoleCmd("r", Command_Ready, "Mark yourself as ready for 2v2 match");
++    RegConsoleCmd("ready", Command_Ready, "Mark yourself as ready for a 2v2 match (or a 1v1 duel when mgemod_1v1_ready is 1)");
++    RegConsoleCmd("r", Command_Ready, "Mark yourself as ready for a 2v2 match (or a 1v1 duel when mgemod_1v1_ready is 1)");
+     
+     AddCommandListener(Command_DropItem, "dropitem");
+     AddCommandListener(Command_SpecNavigation, "spec_next");
+@@ -657,6 +660,8 @@
+         g_b2v2Elo = boolValue;
+     else if (convar == gcvar_clearProjectiles)
+         g_bClearProjectiles = boolValue;
++    else if (convar == gcvar_1v1Ready)
++        g_b1v1Ready = boolValue;
+     else if (convar == gcvar_ratingEngine)
+     {
+         g_eRatingEngine = StrEqual(newValue, "glicko2", false) ? RATING_ENGINE_GLICKO2 : RATING_ENGINE_ELO;
+diff -ruN a/addons/sourcemod/translations/mgemod.phrases.txt b/addons/sourcemod/translations/mgemod.phrases.txt
+--- a/addons/sourcemod/translations/mgemod.phrases.txt	2026-10-31 00:27:58.258273436 +0000
++++ b/addons/sourcemod/translations/mgemod.phrases.txt	2026-10-31 00:27:58.262403591 +0000
+@@ -987,6 +987,25 @@
+ 		"es"			"{1}/4 jugadores listos\n{2}\nEscribe !ready o !r para cambiar"
+ 		"pt"			"{1}/4 jogadores prontos\n{2}\nDigite !ready ou !r para mudar"
+ 	}
++	"Ready1v1HudText"
++	{
++		"#format"		"{1:i},{2:s}"
++		"en"			"{1}/2 players ready\n{2}\nType !ready or !r to toggle"
++		"chi"			"{1}/2 名玩家已准备就绪\n{2}\n输入 !ready 或 !r 切换状态"
++		"de"			"{1}/2 Spieler bereit\n{2}\nGib !ready oder !r ein zum Wechseln"
++		"ru"			"{1}/2 игроков готовы\n{2}\nНапишите !ready или !r для переключения"
++		"es"			"{1}/2 jugadores listos\n{2}\nEscribe !ready o !r para cambiar"
++		"pt"			"{1}/2 jogadores prontos\n{2}\nDigite !ready ou !r para mudar"
++	}
++	"Ready1v1Prompt"
++	{
++		"en"			"{green}[MGE]{default} Both players are in! Pick your class, then type {green}!ready{default} (or {green}!r{default}) to start the duel."
++		"chi"			"{green}[MGE]{default} 双方玩家都已就位！请选择职业，然后输入 {green}!ready{default}（或 {green}!r{default}）开始对决。"
++		"de"			"{green}[MGE]{default} Beide Spieler sind da! Wählt eure Klasse und gebt dann {green}!ready{default} (oder {green}!r{default}) ein, um das Duell zu starten."
++		"ru"			"{green}[MGE]{default} Оба игрока на арене! Выберите класс, затем напишите {green}!ready{default} (или {green}!r{default}), чтобы начать дуэль."
++		"es"			"{green}[MGE]{default} ¡Ambos jugadores están dentro! Elige tu clase y escribe {green}!ready{default} (o {green}!r{default}) para empezar el duelo."
++		"pt"			"{green}[MGE]{default} Os dois jogadores estão dentro! Escolha sua classe e digite {green}!ready{default} (ou {green}!r{default}) para começar o duelo."
++	}
+ 	"2v2ArenaManagementTitle"
+ 	{
+ 		"#format"		"{1:s}"
+@@ -1054,6 +1073,15 @@
+ 		"es"			"¿Listo para el partido 2v2?"
+ 		"pt"			"Pronto para o jogo 2v2?"
+ 	}
++	"Ready1v1MatchTitle"
++	{
++		"en"			"Ready for the duel?"
++		"chi"			"准备好对决了吗？"
++		"de"			"Bereit für das Duell?"
++		"ru"			"Готовы к дуэли?"
++		"es"			"¿Listo para el duelo?"
++		"pt"			"Pronto para o duelo?"
++	}
+ 	"YesImReady"
+ 	{
+ 		"en"			"Yes, I'm ready!"

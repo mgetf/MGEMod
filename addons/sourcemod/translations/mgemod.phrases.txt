@@ -987,6 +987,25 @@
 		"es"			"{1}/4 jugadores listos\n{2}\nEscribe !ready o !r para cambiar"
 		"pt"			"{1}/4 jogadores prontos\n{2}\nDigite !ready ou !r para mudar"
 	}
+	"Ready1v1HudText"
+	{
+		"#format"		"{1:i},{2:s}"
+		"en"			"{1}/2 players ready\n{2}\nType !ready or !r to toggle"
+		"chi"			"{1}/2 名玩家已准备就绪\n{2}\n输入 !ready 或 !r 切换状态"
+		"de"			"{1}/2 Spieler bereit\n{2}\nGib !ready oder !r ein zum Wechseln"
+		"ru"			"{1}/2 игроков готовы\n{2}\nНапишите !ready или !r для переключения"
+		"es"			"{1}/2 jugadores listos\n{2}\nEscribe !ready o !r para cambiar"
+		"pt"			"{1}/2 jogadores prontos\n{2}\nDigite !ready ou !r para mudar"
+	}
+	"Ready1v1Prompt"
+	{
+		"en"			"{green}[MGE]{default} Both players are in! Pick your class, then type {green}!ready{default} (or {green}!r{default}) to start the duel."
+		"chi"			"{green}[MGE]{default} 双方玩家都已就位！请选择职业，然后输入 {green}!ready{default}（或 {green}!r{default}）开始对决。"
+		"de"			"{green}[MGE]{default} Beide Spieler sind da! Wählt eure Klasse und gebt dann {green}!ready{default} (oder {green}!r{default}) ein, um das Duell zu starten."
+		"ru"			"{green}[MGE]{default} Оба игрока на арене! Выберите класс, затем напишите {green}!ready{default} (или {green}!r{default}), чтобы начать дуэль."
+		"es"			"{green}[MGE]{default} ¡Ambos jugadores están dentro! Elige tu clase y escribe {green}!ready{default} (o {green}!r{default}) para empezar el duelo."
+		"pt"			"{green}[MGE]{default} Os dois jogadores estão dentro! Escolha sua classe e digite {green}!ready{default} (ou {green}!r{default}) para começar o duelo."
+	}
 	"2v2ArenaManagementTitle"
 	{
 		"#format"		"{1:s}"
@@ -1053,6 +1072,15 @@
 		"ru"			"Готовы к матчу 2v2?"
 		"es"			"¿Listo para el partido 2v2?"
 		"pt"			"Pronto para o jogo 2v2?"
+	}
+	"Ready1v1MatchTitle"
+	{
+		"en"			"Ready for the duel?"
+		"chi"			"准备好对决了吗？"
+		"de"			"Bereit für das Duell?"
+		"ru"			"Готовы к дуэли?"
+		"es"			"¿Listo para el duelo?"
+		"pt"			"Pronto para o duelo?"
 	}
 	"YesImReady"
 	{

@@ -72,7 +72,7 @@ The public API header. Contains:
 | **Gamemode** | Per-arena mode: `mge`, `bball`, `koth`, `ammomod`, `midair`, `endif`, `ultiduo`, `turris`. Stored as bitmask flags. |
 | **Slot** | Player position in an arena (1–4). Slots 1–2 for 1v1, slots 1–4 for 2v2. |
 | **Queue** | Players join arenas via `!add` or menu. Losers rotate out when queue has waiting players. |
-| **Arena Status** | State machine: `IDLE → PRECOUNTDOWN → COUNTDOWN → FIGHT → AFTERFIGHT → REPORTED`. Also `WAITING_READY` for 2v2. |
+| **Arena Status** | State machine: `IDLE → PRECOUNTDOWN → COUNTDOWN → FIGHT → AFTERFIGHT → REPORTED`. Also `WAITING_READY` for 2v2, and for 1v1 when `mgemod_1v1_ready` is 1 (see `Timer_StartDuel`). |
 | **ELO** | Persistent rating stored in DB. Optional — plugin works without a database. |
 | **Rating Engine** | Pluggable algorithm behind ELO: `elo` (default, live K-factor) or `glicko2` (opt-in). Glicko-2 seals `rating`/`rd`/`volatility` on a wall-clock period. HUD may show `~` from `rating_est`. See `mge/rating/` and [docs/glicko2-24h-period-walkthrough.md](docs/glicko2-24h-period-walkthrough.md). |
 | **Frag Limit** | Score target to win a match. Configurable per-arena. |
